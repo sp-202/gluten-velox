@@ -427,6 +427,9 @@ if(BUILD_EXAMPLES)
   add_subdirectory(udf/examples)
 endif()
 
+# Workspace for custom UDF/UDAF deployment
+add_subdirectory(udf/custom_udf)
+
 if(ENABLE_GPU)
   set(cudf_DIR "${VELOX_BUILD_PATH}/_deps/cudf-build")
   find_package(cudf CONFIG REQUIRED)

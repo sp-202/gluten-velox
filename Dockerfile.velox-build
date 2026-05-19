@@ -1,0 +1,194 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# =============================================================================
+# Gluten + Velox Backend Build Environment
+# =============================================================================
+# Target platform : linux/arm64 (AWS Graviton / aarch64) — PRIMARY
+# Base OS         : Ubuntu 22.04
+# JDK             : OpenJDK 8 (default) | JDK 17 available for Spark 4.x
+# Scala           : 2.12
+# Spark           : 3.5.8  (3.3.1 / 3.4.4 also supported via --spark=)
+#
+# Build on AWS ARM64 EC2:
+#   docker buildx build --platform linux/arm64 \
+#     -f Dockerfile.velox-build -t gluten-velox-builder:arm64 .
+# =============================================================================
+
+# Use the multi-arch Ubuntu 22.04 image.
+# On an ARM64 host (Graviton) this automatically pulls the arm64 layer.
+# The explicit --platform flag in docker build / run guarantees the right arch.
+FROM --platform=linux/arm64 ubuntu:22.04
+
+LABEL maintainer="gluten-velox-dev"
+LABEL description="Build environment for Apache Gluten with Velox backend (ARM64/Graviton)"
+LABEL target.arch="arm64"
+LABEL spark.versions="3.3.1, 3.4.4, 3.5.8"
+LABEL jdk.version="openjdk8"
+LABEL scala.version="2.12"
+
+# Avoid interactive prompts during package installs
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+# ---------------------------------------------------------------------------
+# Build arguments (override at docker build time)
+# ---------------------------------------------------------------------------
+ARG SPARK_VERSION=3.5
+ARG NUM_THREADS=4
+
+# ---------------------------------------------------------------------------
+# CPU target — aarch64 for AWS Graviton / ARM64
+# ---------------------------------------------------------------------------
+ENV CPU_TARGET=aarch64
+
+# ---------------------------------------------------------------------------
+# Java / Maven environment
+# ---------------------------------------------------------------------------
+# On aarch64 the JDK path is arm64 not amd64
+ENV JAVA_HOME=/usr/lib/jvm/java-8-openjdk-arm64
+ENV PATH=${JAVA_HOME}/bin:${PATH}
+ENV MAVEN_VERSION=3.9.6
+ENV MAVEN_HOME=/opt/maven
+ENV PATH=${MAVEN_HOME}/bin:${PATH}
+
+# ---------------------------------------------------------------------------
+# Gluten workspace inside the container
+# ---------------------------------------------------------------------------
+ENV GLUTEN_HOME=/gluten
+WORKDIR ${GLUTEN_HOME}
+
+# ---------------------------------------------------------------------------
+# 1. System packages
+# ---------------------------------------------------------------------------
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends \
+      # Core build tools
+      build-essential \
+      gcc \
+      g++ \
+      git \
+      cmake \
+      ninja-build \
+      ccache \
+      # Python (required for Gluten scripts + pip install regex)
+      python3 \
+      python3-pip \
+      # Downloader / archive tools
+      wget \
+      curl \
+      unzip \
+      tar \
+      # JDKs — arm64 variants
+      openjdk-8-jdk \
+      openjdk-17-jdk \
+      # Required libs
+      libssl-dev \
+      libcurl4-openssl-dev \
+      liblz4-dev \
+      libsnappy-dev \
+      zlib1g-dev \
+      libzstd-dev \
+      libre2-dev \
+      libbz2-dev \
+      libxml2-dev \
+      libprotobuf-dev \
+      protobuf-compiler \
+      pkg-config \
+      # Velox setup dependencies
+      autoconf \
+      automake \
+      libtool \
+      bison \
+      flex \
+      libgflags-dev \
+      libgoogle-glog-dev \
+      libdouble-conversion-dev \
+      libevent-dev \
+      libfmt-dev \
+      libboost-all-dev \
+      # Formatting tool (CI requires clang-format-15)
+      clang-format-15 \
+      clang-15 \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# 2. Python regex package (required for ./dev/check.py header)
+# ---------------------------------------------------------------------------
+RUN pip3 install --no-cache-dir regex
+
+# ---------------------------------------------------------------------------
+# 3. Apache Maven 3.9.6
+# ---------------------------------------------------------------------------
+RUN wget -q "https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz" \
+    -O /tmp/maven.tar.gz && \
+    tar -xzf /tmp/maven.tar.gz -C /opt && \
+    ln -s /opt/apache-maven-${MAVEN_VERSION} ${MAVEN_HOME} && \
+    rm /tmp/maven.tar.gz
+
+RUN mvn -version
+
+# ---------------------------------------------------------------------------
+# 4. Set Java 8 as the default (required for Spark 3.x builds)
+# ---------------------------------------------------------------------------
+RUN update-alternatives --set java /usr/lib/jvm/java-8-openjdk-arm64/bin/java || true
+
+ENV JAVA_HOME=/usr/lib/jvm/java-8-openjdk-arm64
+ENV PATH=${JAVA_HOME}/bin:${PATH}
+
+RUN java -version
+
+# ---------------------------------------------------------------------------
+# 5. Copy the Gluten-Velox source into the container
+#    (When running via docker-build.sh the source is bind-mounted instead,
+#     so this COPY is mainly for CI/CD pipelines that build a self-contained
+#     image via docker build.)
+# ---------------------------------------------------------------------------
+COPY . ${GLUTEN_HOME}/
+
+RUN chmod +x ${GLUTEN_HOME}/dev/*.sh 2>/dev/null || true && \
+    find ${GLUTEN_HOME}/ep -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# 6. Build-time environment
+# ---------------------------------------------------------------------------
+ENV NUM_THREADS=${NUM_THREADS}
+ENV SPARK_VERSION=${SPARK_VERSION}
+
+# ---------------------------------------------------------------------------
+# 7. Default CMD — full one-step build
+#    On an ARM64 EC2, just run:
+#      docker run --rm -v $(pwd):/gluten gluten-velox-builder:arm64
+# ---------------------------------------------------------------------------
+CMD ["/bin/bash", "-c", \
+     "set -e && \
+      echo '=====================================================' && \
+      echo ' Gluten + Velox Backend Builder (ARM64 / Graviton)' && \
+      echo ' Arch          : '$(uname -m) && \
+      echo ' Spark version : '${SPARK_VERSION} && \
+      echo ' Threads       : '${NUM_THREADS} && \
+      echo ' Java home     : '${JAVA_HOME} && \
+      echo '=====================================================' && \
+      cd ${GLUTEN_HOME} && \
+      export NUM_THREADS=${NUM_THREADS} && \
+      export CPU_TARGET=aarch64 && \
+      ./dev/buildbundle-veloxbe.sh --spark_version=${SPARK_VERSION} && \
+      echo '' && \
+      echo '=====================================================' && \
+      echo ' BUILD COMPLETE!' && \
+      echo ' Jar: '${GLUTEN_HOME}/package/target/ && \
+      ls -lh ${GLUTEN_HOME}/package/target/*.jar 2>/dev/null || true && \
+      echo '=====================================================' \
+     "]

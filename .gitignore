@@ -88,3 +88,44 @@ metastore_db/
 
 # Claude Code local config
 .claude/
+
+# =============================================================================
+# Gluten-Velox: build artifacts — do NOT commit these
+# =============================================================================
+
+# Velox external project source (downloaded at build time by get-velox.sh)
+ep/build-velox/build/
+
+# Arrow external project (downloaded at build time by builddeps-veloxbe.sh)
+ep/_ep/
+
+# Compiled native shared libraries
+releases/
+*.so
+*.so.*
+*.a
+*.dylib
+
+# CMake-generated build directories (native cpp)
+cpp/build/
+cpp/_build/
+cpp/velox/_build/
+cpp/_build_*/
+_build/
+
+# Output JARs from docker-build.sh helper
+output/
+
+# ccache directory (machine-specific compile cache)
+.ccache/
+
+# Python byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# =============================================================================
+# Force-include: custom UDF/UDAF source code — always tracked
+# =============================================================================
+!cpp/velox/udf/custom_udf/
+!cpp/velox/udf/custom_udf/**
