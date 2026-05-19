@@ -37,7 +37,7 @@ LABEL maintainer="gluten-velox-dev"
 LABEL description="Build environment for Apache Gluten with Velox backend (ARM64/Graviton)"
 LABEL target.arch="arm64"
 LABEL spark.versions="3.5.8"
-LABEL jdk.version="openjdk8"
+LABEL jdk.version="openjdk17"
 LABEL scala.version="2.12"
 
 # Avoid interactive prompts during package installs
@@ -58,8 +58,9 @@ ENV CPU_TARGET=aarch64
 # ---------------------------------------------------------------------------
 # Java / Maven environment
 # ---------------------------------------------------------------------------
-# On aarch64 the JDK path is arm64 not amd64
-ENV JAVA_HOME=/usr/lib/jvm/java-8-openjdk-arm64
+# Java 17 is required: apache-rat-plugin 0.18 (class file 61.0) needs Java 17+.
+# Spark 3.5 fully supports Java 17.
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64
 ENV PATH=${JAVA_HOME}/bin:${PATH}
 ENV MAVEN_VERSION=3.9.6
 ENV MAVEN_HOME=/opt/maven
@@ -146,11 +147,11 @@ RUN wget -q "https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/bina
 RUN mvn -version
 
 # ---------------------------------------------------------------------------
-# 4. Set Java 8 as the default (required for Spark 3.x builds)
+# 4. Set Java 17 as the default (required by apache-rat-plugin 0.18 + Spark 3.5)
 # ---------------------------------------------------------------------------
-RUN update-alternatives --set java /usr/lib/jvm/java-8-openjdk-arm64/bin/java || true
+RUN update-alternatives --set java /usr/lib/jvm/java-17-openjdk-arm64/bin/java || true
 
-ENV JAVA_HOME=/usr/lib/jvm/java-8-openjdk-arm64
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64
 ENV PATH=${JAVA_HOME}/bin:${PATH}
 
 RUN java -version
