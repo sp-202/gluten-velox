@@ -14,170 +14,194 @@
 # limitations under the License.
 
 # =============================================================================
-# Gluten + Velox Backend Build Environment
+# Gluten + Velox Backend Build Environment — COMPREHENSIVE
 # =============================================================================
 # Target platform : linux/arm64 (AWS Graviton / aarch64)
 # Base OS         : Ubuntu 22.04
-# JDK             : OpenJDK 8
+# JDK             : OpenJDK 17 (apache-rat-plugin 0.18 requires Java 17+)
+# CMake           : 3.30.4 (Velox requires 3.28+; Ubuntu 22.04 ships 3.22)
 # Scala           : 2.12
 # Spark           : 3.5.8 ONLY
 #
-# Build on AWS ARM64 EC2:
-#   docker buildx build --platform linux/arm64 \
-#     -f Dockerfile.velox-build -t gluten-velox-builder:arm64 .
+# All dependencies are pre-installed here so that:
+#   --run_setup_script=OFF  can be passed to buildbundle-veloxbe.sh
+# This avoids Velox's setup script trying to apt-install inside the container.
 # =============================================================================
 
-# TARGETPLATFORM is set automatically by docker buildx (e.g. linux/arm64).
-# Declaring it as an ARG lets us use it in FROM without triggering the
-# FromPlatformFlagConstDisallowed lint warning.
 ARG TARGETPLATFORM=linux/arm64
 FROM --platform=$TARGETPLATFORM ubuntu:22.04
 
 LABEL maintainer="gluten-velox-dev"
-LABEL description="Build environment for Apache Gluten with Velox backend (ARM64/Graviton)"
+LABEL description="Gluten + Velox build env (ARM64/Graviton, Spark 3.5.8)"
 LABEL target.arch="arm64"
 LABEL spark.versions="3.5.8"
 LABEL jdk.version="openjdk17"
+LABEL cmake.version="3.30.4"
 LABEL scala.version="2.12"
 
-# Avoid interactive prompts during package installs
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
 # ---------------------------------------------------------------------------
-# Build arguments (override at docker build time)
+# Build arguments
 # ---------------------------------------------------------------------------
-# Spark version is fixed to 3.5 (maps to Spark 3.5.8 via pom.xml)
 ARG NUM_THREADS=4
+ARG CMAKE_VERSION=3.30.4
+ARG MAVEN_VERSION=3.9.6
 
 # ---------------------------------------------------------------------------
-# CPU target — aarch64 for AWS Graviton / ARM64
-# ---------------------------------------------------------------------------
-ENV CPU_TARGET=aarch64
-
-# ---------------------------------------------------------------------------
-# Java / Maven environment
-# ---------------------------------------------------------------------------
-# Java 17 is required: apache-rat-plugin 0.18 (class file 61.0) needs Java 17+.
+# Java 17 — required by apache-rat-plugin 0.18 (class file 61.0)
 # Spark 3.5 fully supports Java 17.
+# ---------------------------------------------------------------------------
 ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64
 ENV PATH=${JAVA_HOME}/bin:${PATH}
-ENV MAVEN_VERSION=3.9.6
+
+# ---------------------------------------------------------------------------
+# Maven
+# ---------------------------------------------------------------------------
 ENV MAVEN_HOME=/opt/maven
 ENV PATH=${MAVEN_HOME}/bin:${PATH}
 
 # ---------------------------------------------------------------------------
-# Gluten workspace inside the container
+# Gluten workspace
 # ---------------------------------------------------------------------------
 ENV GLUTEN_HOME=/gluten
 WORKDIR ${GLUTEN_HOME}
 
 # ---------------------------------------------------------------------------
-# 1. System packages
+# Step 1 — System packages (exact list from Velox's setup-ubuntu.sh)
+#
+# Sources:
+#   install_build_prerequisites()  → build-essential, ccache, ninja, git, etc.
+#   install_velox_deps_from_apt()  → libc-ares, libssl, glog, gflags, etc.
+#   setup-ubuntu.sh SVE check      → gcc-12, g++-12
+#   Arrow build                    → libprotobuf-dev, protobuf-compiler
+#   Gluten                         → sudo, clang-format-15, openjdk-17
 # ---------------------------------------------------------------------------
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
-      # sudo (needed by Velox build scripts like get-velox.sh)
+      # sudo — needed by Velox scripts (get-velox.sh, setup-ubuntu.sh)
       sudo \
-      # Core build tools — gcc-12/g++-12 required by Velox on Ubuntu 22.04 aarch64
+      # Core build toolchain
       build-essential \
       gcc \
       g++ \
       gcc-12 \
       g++-12 \
+      clang-15 \
+      clang-format-15 \
       git \
-      cmake \
       ninja-build \
       ccache \
-      # Python (required for Gluten scripts + pip install regex)
+      pkg-config \
+      libtool \
+      checkinstall \
+      # Python (Gluten check.py + uv for cmake install)
       python3 \
       python3-pip \
-      # Downloader / archive tools
-      wget \
+      python3-venv \
       curl \
+      wget \
       unzip \
       tar \
-      # JDKs — arm64 variants
-      openjdk-8-jdk \
+      patch \
+      # JDKs
       openjdk-17-jdk \
-      # Required libs
-      libssl-dev \
+      openjdk-8-jdk \
+      # -----------------------------------------------------------------------
+      # Velox deps from apt (install_velox_deps_from_apt in setup-ubuntu.sh)
+      # -----------------------------------------------------------------------
+      libc-ares-dev \
       libcurl4-openssl-dev \
+      libssl-dev \
+      libicu-dev \
+      libdouble-conversion-dev \
+      libgoogle-glog-dev \
+      libbz2-dev \
+      libgflags-dev \
+      libgtest-dev \
+      libgmock-dev \
+      libevent-dev \
       liblz4-dev \
-      libsnappy-dev \
-      zlib1g-dev \
       libzstd-dev \
       libre2-dev \
-      libbz2-dev \
-      libxml2-dev \
-      libprotobuf-dev \
-      protobuf-compiler \
-      pkg-config \
-      # Velox setup dependencies
-      autoconf \
-      automake \
-      libtool \
+      libsnappy-dev \
+      libsodium-dev \
+      libelf-dev \
+      libdwarf-dev \
+      libunwind-dev \
       bison \
       flex \
-      libgflags-dev \
-      libgoogle-glog-dev \
-      libdouble-conversion-dev \
-      libevent-dev \
-      libfmt-dev \
+      libfl-dev \
+      tzdata \
+      libxxhash-dev \
+      libxml2-dev \
+      # Arrow / Protobuf
+      libprotobuf-dev \
+      protobuf-compiler \
+      # Boost (Velox/Arrow use it heavily)
       libboost-all-dev \
-      # Formatting tool (CI requires clang-format-15)
-      clang-format-15 \
-      clang-15 \
+      # zlib
+      zlib1g-dev \
+      # autotools (some thirdparty build with autoconf)
+      autoconf \
+      automake \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
-# 2. Python regex package (required for ./dev/check.py header)
+# Step 2 — Python packages
 # ---------------------------------------------------------------------------
-RUN pip3 install --no-cache-dir regex
+RUN pip3 install --no-cache-dir regex uv
 
 # ---------------------------------------------------------------------------
-# 3. Apache Maven 3.9.6
+# Step 3 — CMake 3.30.4 (Ubuntu 22.04 ships 3.22 — Velox needs 3.28+)
+#   Velox's setup-ubuntu.sh installs cmake via:  uv_install cmake==3.30.4
+#   We replicate that here using the official cmake binary for aarch64.
+# ---------------------------------------------------------------------------
+RUN CMAKE_VERSION=${CMAKE_VERSION} && \
+    wget -q "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-aarch64.sh" \
+         -O /tmp/cmake-install.sh && \
+    chmod +x /tmp/cmake-install.sh && \
+    /tmp/cmake-install.sh --prefix=/usr/local --skip-license && \
+    rm /tmp/cmake-install.sh && \
+    cmake --version
+
+# ---------------------------------------------------------------------------
+# Step 4 — Apache Maven 3.9.6
 # ---------------------------------------------------------------------------
 RUN wget -q "https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz" \
-    -O /tmp/maven.tar.gz && \
+         -O /tmp/maven.tar.gz && \
     tar -xzf /tmp/maven.tar.gz -C /opt && \
     ln -s /opt/apache-maven-${MAVEN_VERSION} ${MAVEN_HOME} && \
-    rm /tmp/maven.tar.gz
-
-RUN mvn -version
+    rm /tmp/maven.tar.gz && \
+    mvn -version
 
 # ---------------------------------------------------------------------------
-# 4. Set Java 17 as the default (required by apache-rat-plugin 0.18 + Spark 3.5)
+# Step 5 — Set Java 17 as default
 # ---------------------------------------------------------------------------
 RUN update-alternatives --set java /usr/lib/jvm/java-17-openjdk-arm64/bin/java || true
-
 ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64
 ENV PATH=${JAVA_HOME}/bin:${PATH}
-
-RUN java -version
+RUN java -version && cmake --version
 
 # ---------------------------------------------------------------------------
-# 5. Copy the Gluten-Velox source into the container
-#    (When running via docker-build.sh the source is bind-mounted instead,
-#     so this COPY is mainly for CI/CD pipelines that build a self-contained
-#     image via docker build.)
+# Step 6 — Copy Gluten-Velox source
+#   When running via docker-build.sh the source is bind-mounted at runtime.
+#   This COPY is for self-contained CI builds (docker build → docker push).
 # ---------------------------------------------------------------------------
 COPY . ${GLUTEN_HOME}/
-
-RUN chmod +x ${GLUTEN_HOME}/dev/*.sh 2>/dev/null || true && \
-    find ${GLUTEN_HOME}/ep -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
+RUN find ${GLUTEN_HOME} -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
-# 6. Build-time environment
+# Step 7 — Build environment variables
 # ---------------------------------------------------------------------------
 ENV NUM_THREADS=${NUM_THREADS}
-# Spark version is fixed — maps to 3.5.8 via pom.xml spark-3.5 profile
 ENV SPARK_VERSION=3.5
+ENV CPU_TARGET=aarch64
 
 # ---------------------------------------------------------------------------
-# 7. Default CMD — full one-step build
-#    On an ARM64 EC2, just run:
-#      docker run --rm -v $(pwd):/gluten gluten-velox-builder:arm64
+# Step 8 — Default CMD
+#   --run_setup_script=OFF : skip Velox's apt installs — we did them above
 # ---------------------------------------------------------------------------
 CMD ["/bin/bash", "-c", \
      "set -e && \
@@ -187,11 +211,14 @@ CMD ["/bin/bash", "-c", \
       echo ' Spark version : 3.5.8  (profile: spark-3.5)' && \
       echo ' Threads       : '${NUM_THREADS} && \
       echo ' Java home     : '${JAVA_HOME} && \
+      echo ' CMake         : '$(cmake --version | head -1) && \
       echo '=====================================================' && \
       cd ${GLUTEN_HOME} && \
       export NUM_THREADS=${NUM_THREADS} && \
       export CPU_TARGET=aarch64 && \
-      ./dev/buildbundle-veloxbe.sh --spark_version=3.5 --run_setup_script=OFF && \
+      ./dev/buildbundle-veloxbe.sh \
+        --spark_version=3.5 \
+        --run_setup_script=OFF && \
       echo '' && \
       echo '=====================================================' && \
       echo ' BUILD COMPLETE! (Spark 3.5.8)' && \
