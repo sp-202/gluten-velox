@@ -53,6 +53,7 @@ else
 fi
 
 IMAGE_NAME="gluten-velox-builder"
+# Spark 3.5 profile → Spark 3.5.8 (hardcoded — only supported version)
 SPARK_VERSION="3.5"
 INTERACTIVE_SHELL=false
 FORCE_REBUILD_IMAGE=false
@@ -103,14 +104,15 @@ NUM_THREADS="${_SAFE_THREADS}"
 # ---------------------------------------------------------------------------
 for arg in "$@"; do
   case $arg in
-    --spark=*)      SPARK_VERSION="${arg#*=}" ;;
     --threads=*)    NUM_THREADS="${arg#*=}" ;;
     --shell)        INTERACTIVE_SHELL=true ;;
     --rebuild-image) FORCE_REBUILD_IMAGE=true ;;
     --platform=amd64) PLATFORM="linux/amd64" ;;
     --platform=arm64) PLATFORM="linux/arm64" ;;
     --help|-h)
-      echo "Usage: $0 [--spark=3.3|3.4|3.5] [--threads=N] [--shell] [--rebuild-image] [--platform=arm64|amd64]"
+      echo "Usage: $0 [--threads=N] [--shell] [--rebuild-image] [--platform=arm64|amd64]"
+      echo ""
+      echo "  Spark version is fixed to 3.5.8 (no other versions supported)"
       exit 0
       ;;
     *)
@@ -130,7 +132,7 @@ echo " Gluten + Velox Backend — Docker Build Helper"
 echo " Host arch     : ${HOST_ARCH}"
 echo " Target arch   : ${ARCH_TAG}  (platform=${PLATFORM})"
 echo " Image         : ${FULL_IMAGE}"
-echo " Spark version : ${SPARK_VERSION}"
+echo " Spark version : 3.5.8  (fixed)"
 echo " Host RAM      : ${_RAM_GB} GB  |  CPUs: ${_CPU_COUNT}"
 echo " Threads       : ${NUM_THREADS}  (1 thread per 2 GB RAM, capped by CPU)"
 echo " Interactive   : ${INTERACTIVE_SHELL}"
@@ -193,7 +195,7 @@ DOCKER_RUN_ARGS=(
   --rm
   --platform "${PLATFORM}"
   -e NUM_THREADS="${NUM_THREADS}"
-  -e SPARK_VERSION="${SPARK_VERSION}"
+  -e SPARK_VERSION="3.5"
   -e CPU_TARGET="aarch64"
   # Bind-mount the source so edits on the host are immediately inside
   -v "${SCRIPT_DIR}:/gluten"

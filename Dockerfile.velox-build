@@ -16,11 +16,11 @@
 # =============================================================================
 # Gluten + Velox Backend Build Environment
 # =============================================================================
-# Target platform : linux/arm64 (AWS Graviton / aarch64) — PRIMARY
+# Target platform : linux/arm64 (AWS Graviton / aarch64)
 # Base OS         : Ubuntu 22.04
-# JDK             : OpenJDK 8 (default) | JDK 17 available for Spark 4.x
+# JDK             : OpenJDK 8
 # Scala           : 2.12
-# Spark           : 3.5.8  (3.3.1 / 3.4.4 also supported via --spark=)
+# Spark           : 3.5.8 ONLY
 #
 # Build on AWS ARM64 EC2:
 #   docker buildx build --platform linux/arm64 \
@@ -35,7 +35,7 @@ FROM --platform=linux/arm64 ubuntu:22.04
 LABEL maintainer="gluten-velox-dev"
 LABEL description="Build environment for Apache Gluten with Velox backend (ARM64/Graviton)"
 LABEL target.arch="arm64"
-LABEL spark.versions="3.3.1, 3.4.4, 3.5.8"
+LABEL spark.versions="3.5.8"
 LABEL jdk.version="openjdk8"
 LABEL scala.version="2.12"
 
@@ -46,7 +46,7 @@ ENV TZ=UTC
 # ---------------------------------------------------------------------------
 # Build arguments (override at docker build time)
 # ---------------------------------------------------------------------------
-ARG SPARK_VERSION=3.5
+# Spark version is fixed to 3.5 (maps to Spark 3.5.8 via pom.xml)
 ARG NUM_THREADS=4
 
 # ---------------------------------------------------------------------------
@@ -165,7 +165,8 @@ RUN chmod +x ${GLUTEN_HOME}/dev/*.sh 2>/dev/null || true && \
 # 6. Build-time environment
 # ---------------------------------------------------------------------------
 ENV NUM_THREADS=${NUM_THREADS}
-ENV SPARK_VERSION=${SPARK_VERSION}
+# Spark version is fixed — maps to 3.5.8 via pom.xml spark-3.5 profile
+ENV SPARK_VERSION=3.5
 
 # ---------------------------------------------------------------------------
 # 7. Default CMD — full one-step build
@@ -177,17 +178,17 @@ CMD ["/bin/bash", "-c", \
       echo '=====================================================' && \
       echo ' Gluten + Velox Backend Builder (ARM64 / Graviton)' && \
       echo ' Arch          : '$(uname -m) && \
-      echo ' Spark version : '${SPARK_VERSION} && \
+      echo ' Spark version : 3.5.8  (profile: spark-3.5)' && \
       echo ' Threads       : '${NUM_THREADS} && \
       echo ' Java home     : '${JAVA_HOME} && \
       echo '=====================================================' && \
       cd ${GLUTEN_HOME} && \
       export NUM_THREADS=${NUM_THREADS} && \
       export CPU_TARGET=aarch64 && \
-      ./dev/buildbundle-veloxbe.sh --spark_version=${SPARK_VERSION} && \
+      ./dev/buildbundle-veloxbe.sh --spark_version=3.5 && \
       echo '' && \
       echo '=====================================================' && \
-      echo ' BUILD COMPLETE!' && \
+      echo ' BUILD COMPLETE! (Spark 3.5.8)' && \
       echo ' Jar: '${GLUTEN_HOME}/package/target/ && \
       ls -lh ${GLUTEN_HOME}/package/target/*.jar 2>/dev/null || true && \
       echo '=====================================================' \
