@@ -236,6 +236,10 @@ function build_velox {
 
 function build_gluten_cpp {
   echo "Start to build Gluten CPP"
+  if [ -f /etc/debian_version ]; then
+    echo "Installing system protobuf for Gluten CPP build..."
+    sudo apt-get update -y && sudo apt-get install -y --no-install-recommends libprotobuf-dev protobuf-compiler
+  fi
   cd $GLUTEN_DIR/cpp
   rm -rf build
   mkdir build
