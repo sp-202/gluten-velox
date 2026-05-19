@@ -27,10 +27,11 @@
 #     -f Dockerfile.velox-build -t gluten-velox-builder:arm64 .
 # =============================================================================
 
-# Use the multi-arch Ubuntu 22.04 image.
-# On an ARM64 host (Graviton) this automatically pulls the arm64 layer.
-# The explicit --platform flag in docker build / run guarantees the right arch.
-FROM --platform=linux/arm64 ubuntu:22.04
+# TARGETPLATFORM is set automatically by docker buildx (e.g. linux/arm64).
+# Declaring it as an ARG lets us use it in FROM without triggering the
+# FromPlatformFlagConstDisallowed lint warning.
+ARG TARGETPLATFORM=linux/arm64
+FROM --platform=$TARGETPLATFORM ubuntu:22.04
 
 LABEL maintainer="gluten-velox-dev"
 LABEL description="Build environment for Apache Gluten with Velox backend (ARM64/Graviton)"
@@ -75,6 +76,8 @@ WORKDIR ${GLUTEN_HOME}
 # ---------------------------------------------------------------------------
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
+      # sudo (needed by Velox build scripts like get-velox.sh)
+      sudo \
       # Core build tools
       build-essential \
       gcc \
