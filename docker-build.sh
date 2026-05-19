@@ -54,12 +54,49 @@ fi
 
 IMAGE_NAME="gluten-velox-builder"
 SPARK_VERSION="3.5"
-NUM_THREADS=$(( $(nproc 2>/dev/null || echo 8) - 2 ))
-NUM_THREADS=$(( NUM_THREADS < 1 ? 1 : NUM_THREADS ))
 INTERACTIVE_SHELL=false
 FORCE_REBUILD_IMAGE=false
 PLATFORM="${DEFAULT_PLATFORM}"
 OUTPUT_DIR="${SCRIPT_DIR}/output"
+
+# ---------------------------------------------------------------------------
+# RAM-aware thread calculation
+# Gluten docs: "Building Velox may fail caused by OOM.
+#               Recommended minimal memory size is 64G."
+# Safe rule: 1 thread per 2GB of available RAM, capped by nproc.
+# You can always override via --threads=N.
+# ---------------------------------------------------------------------------
+_detect_safe_threads() {
+  local cpu_count
+  cpu_count=$(nproc 2>/dev/null || echo 4)
+
+  # Read total RAM in GB (Linux: /proc/meminfo, macOS: sysctl)
+  local ram_gb=0
+  if [[ -f /proc/meminfo ]]; then
+    local ram_kb
+    ram_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+    ram_gb=$(( ram_kb / 1024 / 1024 ))
+  elif command -v sysctl &>/dev/null; then
+    local ram_bytes
+    ram_bytes=$(sysctl -n hw.memsize 2>/dev/null || echo 0)
+    ram_gb=$(( ram_bytes / 1024 / 1024 / 1024 ))
+  fi
+
+  # 1 thread per 2 GB, capped by CPU count, minimum 1
+  local threads_by_ram=$(( ram_gb / 2 ))
+  local safe=$(( threads_by_ram < cpu_count ? threads_by_ram : cpu_count ))
+  safe=$(( safe < 1 ? 1 : safe ))
+
+  echo "${safe}:${ram_gb}:${cpu_count}"
+}
+
+_THREAD_INFO=$(_detect_safe_threads)
+_SAFE_THREADS=$(echo "${_THREAD_INFO}" | cut -d: -f1)
+_RAM_GB=$(echo      "${_THREAD_INFO}" | cut -d: -f2)
+_CPU_COUNT=$(echo   "${_THREAD_INFO}" | cut -d: -f3)
+
+# Default to safe thread count — user can override via --threads=N
+NUM_THREADS="${_SAFE_THREADS}"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -94,9 +131,26 @@ echo " Host arch     : ${HOST_ARCH}"
 echo " Target arch   : ${ARCH_TAG}  (platform=${PLATFORM})"
 echo " Image         : ${FULL_IMAGE}"
 echo " Spark version : ${SPARK_VERSION}"
-echo " Threads       : ${NUM_THREADS}"
+echo " Host RAM      : ${_RAM_GB} GB  |  CPUs: ${_CPU_COUNT}"
+echo " Threads       : ${NUM_THREADS}  (1 thread per 2 GB RAM, capped by CPU)"
 echo " Interactive   : ${INTERACTIVE_SHELL}"
 echo "============================================================"
+
+# ---------------------------------------------------------------------------
+# OOM pre-flight check (Gluten docs: minimum 64 GB recommended)
+# ---------------------------------------------------------------------------
+if (( _RAM_GB < 64 )); then
+  echo ""
+  echo "⚠️  WARNING: Only ${_RAM_GB} GB RAM detected."
+  echo "   Gluten/Velox build recommends a MINIMUM of 64 GB to avoid OOM."
+  echo "   Current thread count set to ${NUM_THREADS} to be safe."
+  echo "   Options:"
+  echo "     • Use a larger EC2 instance (e.g. r7g.4xlarge = 128GB on Graviton3)"
+  echo "     • Lower threads further:  ./docker-build.sh --threads=2"
+  echo "     • Add swap space:  sudo fallocate -l 32G /swapfile && ..."
+  echo "       sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile"
+  echo ""
+fi
 
 # ---------------------------------------------------------------------------
 # Warn if host ≠ target (requires QEMU binfmt for cross-build)
