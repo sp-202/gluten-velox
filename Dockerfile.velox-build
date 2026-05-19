@@ -78,10 +78,12 @@ RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
       # sudo (needed by Velox build scripts like get-velox.sh)
       sudo \
-      # Core build tools
+      # Core build tools — gcc-12/g++-12 required by Velox on Ubuntu 22.04 aarch64
       build-essential \
       gcc \
       g++ \
+      gcc-12 \
+      g++-12 \
       git \
       cmake \
       ninja-build \
@@ -188,7 +190,7 @@ CMD ["/bin/bash", "-c", \
       cd ${GLUTEN_HOME} && \
       export NUM_THREADS=${NUM_THREADS} && \
       export CPU_TARGET=aarch64 && \
-      ./dev/buildbundle-veloxbe.sh --spark_version=3.5 && \
+      ./dev/buildbundle-veloxbe.sh --spark_version=3.5 --run_setup_script=OFF && \
       echo '' && \
       echo '=====================================================' && \
       echo ' BUILD COMPLETE! (Spark 3.5.8)' && \
