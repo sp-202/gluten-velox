@@ -136,13 +136,13 @@ RUN apt-get update -y && \
       tzdata \
       libxxhash-dev \
       libxml2-dev \
-      # Arrow / Protobuf
+      # Boost — required by Gluten CPP (core/CMakeLists.txt: find_package(Boost))
+      # Velox uses its own internal Boost via FetchContent, no conflict here.
+      libboost-all-dev \
       # NOTE: do NOT install libprotobuf-dev or protobuf-compiler here!
-      # Velox and Arrow both build their own bundled protobuf.
-      # System protobuf (4.x from Ubuntu 22.04) conflicts with Velox's
-      # ORC-generated headers which use removed protobuf 3.x APIs.
-      # NOTE: do NOT install libboost-all-dev here either!
-      # Velox builds its own Boost. System Boost can cause header conflicts.
+      # Velox and Arrow build their own bundled protobuf.
+      # System protobuf conflicts with Velox's ORC pre-generated pb.h headers
+      # which use removed protobuf 3.x APIs (UnsafeArenaRelease, PROTOBUF_ULONGLONG).
       # zlib
       zlib1g-dev \
       # autotools (some thirdparty builds with autoconf)
