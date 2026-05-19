@@ -137,13 +137,15 @@ RUN apt-get update -y && \
       libxxhash-dev \
       libxml2-dev \
       # Arrow / Protobuf
-      libprotobuf-dev \
-      protobuf-compiler \
-      # Boost (Velox/Arrow use it heavily)
-      libboost-all-dev \
+      # NOTE: do NOT install libprotobuf-dev or protobuf-compiler here!
+      # Velox and Arrow both build their own bundled protobuf.
+      # System protobuf (4.x from Ubuntu 22.04) conflicts with Velox's
+      # ORC-generated headers which use removed protobuf 3.x APIs.
+      # NOTE: do NOT install libboost-all-dev here either!
+      # Velox builds its own Boost. System Boost can cause header conflicts.
       # zlib
       zlib1g-dev \
-      # autotools (some thirdparty build with autoconf)
+      # autotools (some thirdparty builds with autoconf)
       autoconf \
       automake \
     && rm -rf /var/lib/apt/lists/*
