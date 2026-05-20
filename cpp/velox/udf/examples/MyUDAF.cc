@@ -20,9 +20,12 @@
 #include <velox/functions/Macros.h>
 #include <velox/functions/Registerer.h>
 #include <velox/functions/lib/aggregates/AverageAggregateBase.h>
+#include <vector>
 
 #include "udf/Udaf.h"
 #include "udf/examples/UdfCommon.h"
+using std::begin;
+using std::end;
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec;
