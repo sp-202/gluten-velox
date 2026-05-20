@@ -197,9 +197,11 @@ DOCKER_RUN_ARGS=(
   -e NUM_THREADS="${NUM_THREADS}"
   -e SPARK_VERSION="3.5"
   -e CPU_TARGET="aarch64"
-  # Bind-mount the source so edits on the host are immediately inside
-  -v "${SCRIPT_DIR}:/gluten"
-  # Bind-mount output dir so JARs are accessible on the host after build
+  # No source bind-mount: source is baked into the image via COPY in Dockerfile.
+  # A bind-mount would shadow /gluten with a host path that the Docker daemon
+  # (running on the EC2 host) cannot resolve when docker-build.sh runs inside
+  # a code-server container (host path differs from container-internal path).
+  # Bind-mount output dir so JARs come back to the host after build
   -v "${OUTPUT_DIR}:/output"
   -w /gluten
 )
@@ -221,12 +223,9 @@ else
 
   echo ""
   echo "============================================================"
-  echo " Copying built JARs to: ${OUTPUT_DIR}"
+  echo " Built JARs are in: ${OUTPUT_DIR}"
+  echo " (copied there by the container's CMD via /output mount)"
   echo "============================================================"
-  find "${SCRIPT_DIR}/package/target/" -name "*.jar" \
-    -not -name "*sources*" \
-    -not -name "*javadoc*" \
-    -exec cp -v {} "${OUTPUT_DIR}/" \; 2>/dev/null || true
 
   echo ""
   echo "Built artifacts:"

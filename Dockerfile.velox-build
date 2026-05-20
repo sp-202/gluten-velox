@@ -177,8 +177,10 @@ CMD ["/bin/bash", "-c", \
         --run_setup_script=ON && \
       echo '' && \
       echo '=====================================================' && \
-      echo ' BUILD COMPLETE! (Spark 3.5.8)' && \
-      echo ' Jar: '${GLUTEN_HOME}/package/target/ && \
-      ls -lh ${GLUTEN_HOME}/package/target/*.jar 2>/dev/null || true && \
+      echo ' BUILD COMPLETE! Copying JARs to /output ...' && \
+      find ${GLUTEN_HOME}/package/target/ -name '*.jar' \
+        ! -name '*sources*' ! -name '*javadoc*' \
+        -exec cp -v {} /output/ \\; 2>/dev/null || true && \
+      ls -lh /output/*.jar 2>/dev/null || echo 'No JARs found in /output' && \
       echo '=====================================================' \
      "]
