@@ -14,74 +14,53 @@
 # limitations under the License.
 
 # =============================================================================
-# Gluten + Velox Backend Build Environment
+# TWO-STAGE BUILD
 # =============================================================================
-# Target platform : linux/arm64 (AWS Graviton / aarch64)
-# Base OS         : Ubuntu 22.04
-# JDK             : OpenJDK 17 (apache-rat-plugin 0.18 requires Java 17+)
-# CMake           : 3.30.4 (Velox requires 3.28+; Ubuntu 22.04 ships 3.22)
-# Scala           : 2.12
-# Spark           : 3.5.8 ONLY
 #
-# Strategy: install only the packages NOT handled by Velox's setup-ubuntu.sh,
-# then pass --run_setup_script=ON so Velox installs its own deps (including
-# Folly which it builds via FetchContent, fizz, fbthrift, arrow, etc).
+# Stage 1 — gluten-velox-base  (~90 min, build once)
+#   Clones IBM/velox, runs setup-ubuntu.sh, builds Velox + Arrow.
+#   Tag: gluten-velox-base:arm64
+#   Rebuild only when: Velox branch changes, or OS/tool versions change.
+#
+# Stage 2 — gluten-velox-builder  (~5 min, rebuild on every code change)
+#   FROM gluten-velox-base. Copies Gluten source, builds Gluten CPP + Maven JAR.
+#   Tag: gluten-velox-builder:arm64
+#   Rebuild on: any Gluten source change.
+#
+# docker-build.sh builds Stage 1 with --rebuild-base, Stage 2 always.
 # =============================================================================
 
 ARG TARGETPLATFORM=linux/arm64
-FROM --platform=$TARGETPLATFORM ubuntu:22.04
-
-LABEL maintainer="gluten-velox-dev"
-LABEL description="Gluten + Velox build env (ARM64/Graviton, Spark 3.5.8)"
-LABEL target.arch="arm64"
-LABEL spark.versions="3.5.8"
-LABEL jdk.version="openjdk17"
-LABEL cmake.version="3.30.4"
-LABEL scala.version="2.12"
-
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=UTC
-
-# ---------------------------------------------------------------------------
-# Build arguments
-# ---------------------------------------------------------------------------
 ARG NUM_THREADS=4
 ARG CMAKE_VERSION=3.30.4
 ARG MAVEN_VERSION=3.9.6
 
-# ---------------------------------------------------------------------------
-# Java 17 — required by apache-rat-plugin 0.18 (class file 61.0)
-# Spark 3.5 fully supports Java 17.
-# ---------------------------------------------------------------------------
+# =============================================================================
+# STAGE 1 — velox-base: all slow deps baked in
+# =============================================================================
+FROM --platform=$TARGETPLATFORM ubuntu:22.04 AS velox-base
+
+LABEL maintainer="gluten-velox-dev"
+LABEL stage="velox-base"
+LABEL description="Velox + Arrow pre-built base (ARM64/Graviton)"
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+ARG NUM_THREADS=4
+ARG CMAKE_VERSION=3.30.4
+ARG MAVEN_VERSION=3.9.6
+
 ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64
-ENV PATH=${JAVA_HOME}/bin:${PATH}
-
-# ---------------------------------------------------------------------------
-# Maven
-# ---------------------------------------------------------------------------
 ENV MAVEN_HOME=/opt/maven
-ENV PATH=${MAVEN_HOME}/bin:${PATH}
-
-# ---------------------------------------------------------------------------
-# Gluten workspace
-# ---------------------------------------------------------------------------
+ENV PATH=${JAVA_HOME}/bin:${MAVEN_HOME}/bin:/usr/local/bin:${PATH}
 ENV GLUTEN_HOME=/gluten
+ENV VELOX_HOME=/gluten/ep/build-velox/build/velox_ep
+
 WORKDIR ${GLUTEN_HOME}
 
 # ---------------------------------------------------------------------------
-# Step 1 — Minimal system packages needed before Velox's setup script runs
-#
-# We only install what Velox's setup-ubuntu.sh does NOT handle:
-#   - sudo (needed by the setup script itself)
-#   - openjdk-17 (needed by Maven/Gluten, not a Velox dep)
-#   - openjdk-8 (fallback JDK)
-#   - python3/pip/venv (needed by Gluten's check.py and uv install)
-#   - curl/wget/git (needed to fetch sources)
-#   - Maven prerequisites
-#   - Boost (Gluten CPP uses system Boost; Velox uses its own internal copy)
-#
-# Everything else (glog, gflags, gtest, re2, lz4, zstd, folly, arrow, etc.)
-# is handled by Velox's setup-ubuntu.sh via --run_setup_script=ON.
+# Step 1 — System packages
 # ---------------------------------------------------------------------------
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
@@ -115,61 +94,84 @@ RUN apt-get update -y && \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
-# Step 2 — Python packages
+# Step 2 — Python packages (uv needed by Velox setup script)
 # ---------------------------------------------------------------------------
 RUN pip3 install --no-cache-dir regex uv
 
 # ---------------------------------------------------------------------------
-# Step 3 — CMake 3.30.4 (Ubuntu 22.04 ships 3.22 — Velox needs 3.28+)
-#   Velox's setup-ubuntu.sh installs cmake via:  uv_install cmake==3.30.4
-#   We replicate that here using the official cmake binary for aarch64.
+# Step 3 — CMake 3.30.4
 # ---------------------------------------------------------------------------
-RUN CMAKE_VERSION=${CMAKE_VERSION} && \
-    wget -q "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-aarch64.sh" \
+RUN wget -q "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-aarch64.sh" \
          -O /tmp/cmake-install.sh && \
     chmod +x /tmp/cmake-install.sh && \
     /tmp/cmake-install.sh --prefix=/usr/local --skip-license && \
-    rm /tmp/cmake-install.sh && \
-    cmake --version
+    rm /tmp/cmake-install.sh
 
 # ---------------------------------------------------------------------------
-# Step 4 — Apache Maven 3.9.6
+# Step 4 — Apache Maven
 # ---------------------------------------------------------------------------
 RUN wget -q "https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz" \
          -O /tmp/maven.tar.gz && \
     tar -xzf /tmp/maven.tar.gz -C /opt && \
     ln -s /opt/apache-maven-${MAVEN_VERSION} ${MAVEN_HOME} && \
-    rm /tmp/maven.tar.gz && \
-    mvn -version
+    rm /tmp/maven.tar.gz
 
 # ---------------------------------------------------------------------------
 # Step 5 — Set Java 17 as default
 # ---------------------------------------------------------------------------
 RUN update-alternatives --set java /usr/lib/jvm/java-17-openjdk-arm64/bin/java || true
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64
-ENV PATH=${JAVA_HOME}/bin:${PATH}
-RUN java -version && cmake --version
+RUN java -version && cmake --version && mvn -version
 
 # ---------------------------------------------------------------------------
-# Step 6 — Copy Gluten-Velox source
-#   When running via docker-build.sh the source is bind-mounted at runtime.
-#   This COPY is for self-contained CI builds (docker build → docker push).
+# Step 6 — Copy only the files needed to fetch + build Velox and Arrow.
+#   We copy the ep/ and dev/ directories — NOT the full Gluten source.
+#   This way changes to Gluten Java/CPP source don't invalidate this layer.
+# ---------------------------------------------------------------------------
+COPY ep/ ${GLUTEN_HOME}/ep/
+COPY dev/ ${GLUTEN_HOME}/dev/
+RUN find ${GLUTEN_HOME} -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# Step 7 — Clone Velox, run its setup script, build Velox + Arrow.
+#   This is the slow step (~90 min). Cached forever unless ep/ or dev/ changes.
+# ---------------------------------------------------------------------------
+ENV NUM_THREADS=${NUM_THREADS}
+ENV CPU_TARGET=aarch64
+
+RUN apt-get update -y && \
+    cd ${GLUTEN_HOME} && \
+    export NUM_THREADS=${NUM_THREADS} && \
+    export CPU_TARGET=aarch64 && \
+    export VELOX_HOME=${VELOX_HOME} && \
+    # Run only: get_velox + setup_dependencies + build_arrow + build_velox
+    # (not build_gluten_cpp — that needs full Gluten source in Stage 2)
+    ./dev/builddeps-veloxbe.sh \
+      --run_setup_script=ON \
+      build_arrow \
+      build_velox && \
+    # Clean build artifacts that aren't needed at runtime to shrink image size
+    find ${VELOX_HOME}/_build -name "*.o" -delete 2>/dev/null || true && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# =============================================================================
+# STAGE 2 — gluten-velox-builder: fast Gluten source build on top of base
+# =============================================================================
+FROM velox-base AS gluten-velox-builder
+
+LABEL stage="gluten-velox-builder"
+LABEL description="Gluten + Velox final build (ARM64/Graviton, Spark 3.5.8)"
+
+ARG NUM_THREADS=4
+ENV NUM_THREADS=${NUM_THREADS}
+
+# ---------------------------------------------------------------------------
+# Copy full Gluten source — only this layer reruns on source changes
 # ---------------------------------------------------------------------------
 COPY . ${GLUTEN_HOME}/
 RUN find ${GLUTEN_HOME} -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
-# Step 7 — Build environment variables
-# ---------------------------------------------------------------------------
-ENV NUM_THREADS=${NUM_THREADS}
-ENV SPARK_VERSION=3.5
-ENV CPU_TARGET=aarch64
-
-# ---------------------------------------------------------------------------
-# Step 8 — Default CMD
-#   --run_setup_script=ON : let Velox's setup-ubuntu.sh install its own deps
-#   (Folly, fizz, fbthrift, arrow, re2, glog, gflags, etc. are all handled
-#    by Velox's setup script — we must NOT try to pre-install them)
+# Default CMD — builds only Gluten CPP + Maven JAR (~5 min)
 # ---------------------------------------------------------------------------
 CMD ["/bin/bash", "-c", \
      "set -e && \
@@ -185,9 +187,11 @@ CMD ["/bin/bash", "-c", \
       cd ${GLUTEN_HOME} && \
       export NUM_THREADS=${NUM_THREADS} && \
       export CPU_TARGET=aarch64 && \
+      export VELOX_HOME=${VELOX_HOME} && \
       ./dev/buildbundle-veloxbe.sh \
         --spark_version=3.5 \
-        --run_setup_script=ON && \
+        --run_setup_script=OFF \
+        --build_arrow=OFF && \
       echo '' && \
       echo '=====================================================' && \
       echo ' BUILD COMPLETE! Copying JARs to /output ...' && \

@@ -52,11 +52,13 @@ else
   DEFAULT_PLATFORM="linux/amd64"
 fi
 
+BASE_IMAGE_NAME="gluten-velox-base"
 IMAGE_NAME="gluten-velox-builder"
 # Spark 3.5 profile → Spark 3.5.8 (hardcoded — only supported version)
 SPARK_VERSION="3.5"
 INTERACTIVE_SHELL=false
 FORCE_REBUILD_IMAGE=false
+FORCE_REBUILD_BASE=false
 PLATFORM="${DEFAULT_PLATFORM}"
 OUTPUT_DIR="${SCRIPT_DIR}/output"
 
@@ -107,11 +109,14 @@ for arg in "$@"; do
     --threads=*)    NUM_THREADS="${arg#*=}" ;;
     --shell)        INTERACTIVE_SHELL=true ;;
     --rebuild-image) FORCE_REBUILD_IMAGE=true ;;
+    --rebuild-base)  FORCE_REBUILD_BASE=true; FORCE_REBUILD_IMAGE=true ;;
     --platform=amd64) PLATFORM="linux/amd64" ;;
     --platform=arm64) PLATFORM="linux/arm64" ;;
     --help|-h)
-      echo "Usage: $0 [--threads=N] [--shell] [--rebuild-image] [--platform=arm64|amd64]"
+      echo "Usage: $0 [--threads=N] [--shell] [--rebuild-image] [--rebuild-base] [--platform=arm64|amd64]"
       echo ""
+      echo "  --rebuild-image   Rebuild Stage 2 (Gluten source) — use after code changes (~5 min)"
+      echo "  --rebuild-base    Rebuild Stage 1 (Velox+Arrow) + Stage 2 — use after Velox upgrade (~90 min)"
       echo "  Spark version is fixed to 3.5.8 (no other versions supported)"
       exit 0
       ;;
@@ -125,13 +130,15 @@ done
 
 # Derive a tag that encodes the target arch so amd64 and arm64 images don't clash
 ARCH_TAG="${PLATFORM//linux\//}"        # "arm64" or "amd64"
+BASE_IMAGE="${BASE_IMAGE_NAME}:${ARCH_TAG}"
 FULL_IMAGE="${IMAGE_NAME}:${ARCH_TAG}"
 
 echo "============================================================"
 echo " Gluten + Velox Backend — Docker Build Helper"
 echo " Host arch     : ${HOST_ARCH}"
 echo " Target arch   : ${ARCH_TAG}  (platform=${PLATFORM})"
-echo " Image         : ${FULL_IMAGE}"
+echo " Base image    : ${BASE_IMAGE}  (Velox+Arrow, slow — rebuild with --rebuild-base)"
+echo " Build image   : ${FULL_IMAGE}  (Gluten source, fast — rebuild with --rebuild-image)"
 echo " Spark version : 3.5.8  (fixed)"
 echo " Host RAM      : ${_RAM_GB} GB  |  CPUs: ${_CPU_COUNT}"
 echo " Threads       : ${NUM_THREADS}  (1 thread per 2 GB RAM, capped by CPU)"
@@ -167,23 +174,44 @@ if [[ "${PLATFORM}" == "linux/arm64" && "${HOST_ARCH}" != "aarch64" && "${HOST_A
 fi
 
 # ---------------------------------------------------------------------------
-# Build Docker image if needed
+# Stage 1 — Build base image (Velox + Arrow) if needed
+# Only rebuilt with --rebuild-base or if it doesn't exist yet.
+# ---------------------------------------------------------------------------
+if [[ "${FORCE_REBUILD_BASE}" == "true" ]] || \
+   ! docker image inspect "${BASE_IMAGE}" &>/dev/null; then
+  echo ""
+  echo ">>> Building Stage 1 base image: ${BASE_IMAGE} (~90 min, build once) ..."
+  docker buildx build \
+    --platform "${PLATFORM}" \
+    --load \
+    --build-arg NUM_THREADS="${NUM_THREADS}" \
+    --target velox-base \
+    -f "${SCRIPT_DIR}/Dockerfile.velox-build" \
+    -t "${BASE_IMAGE}" \
+    "${SCRIPT_DIR}"
+  echo ">>> Base image built successfully: ${BASE_IMAGE}"
+else
+  echo ">>> Base image '${BASE_IMAGE}' exists. Use --rebuild-base to rebuild Velox+Arrow."
+fi
+
+# ---------------------------------------------------------------------------
+# Stage 2 — Build Gluten source image (fast, ~5 min on source changes)
 # ---------------------------------------------------------------------------
 if [[ "${FORCE_REBUILD_IMAGE}" == "true" ]] || \
    ! docker image inspect "${FULL_IMAGE}" &>/dev/null; then
   echo ""
-  echo ">>> Building Docker image: ${FULL_IMAGE} (platform=${PLATFORM}) ..."
+  echo ">>> Building Stage 2 builder image: ${FULL_IMAGE} (~5 min) ..."
   docker buildx build \
     --platform "${PLATFORM}" \
     --load \
-    --build-arg SPARK_VERSION="${SPARK_VERSION}" \
     --build-arg NUM_THREADS="${NUM_THREADS}" \
+    --target gluten-velox-builder \
     -f "${SCRIPT_DIR}/Dockerfile.velox-build" \
     -t "${FULL_IMAGE}" \
     "${SCRIPT_DIR}"
-  echo ">>> Docker image built successfully: ${FULL_IMAGE}"
+  echo ">>> Builder image built successfully: ${FULL_IMAGE}"
 else
-  echo ">>> Image '${FULL_IMAGE}' exists. Use --rebuild-image to force rebuild."
+  echo ">>> Builder image '${FULL_IMAGE}' exists. Use --rebuild-image to rebuild."
 fi
 
 mkdir -p "${OUTPUT_DIR}"
