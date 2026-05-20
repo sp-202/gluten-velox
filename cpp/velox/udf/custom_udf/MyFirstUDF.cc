@@ -24,8 +24,6 @@
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec;
-using std::begin;
-using std::end;
 
 namespace {
 
@@ -86,6 +84,8 @@ void setupRegisterers() {
 } // namespace
 
 DEFINE_GET_NUM_UDF {
+  using std::begin;
+  using std::end;
   setupRegisterers();
 
   int numUdf = 0;
@@ -96,6 +96,8 @@ DEFINE_GET_NUM_UDF {
 }
 
 DEFINE_GET_UDF_ENTRIES {
+  using std::begin;
+  using std::end;
   setupRegisterers();
 
   int index = 0;
@@ -105,6 +107,8 @@ DEFINE_GET_UDF_ENTRIES {
 }
 
 DEFINE_REGISTER_UDF {
+  using std::begin;
+  using std::end;
   setupRegisterers();
 
   for (const auto& registerer : globalRegisters()) {
