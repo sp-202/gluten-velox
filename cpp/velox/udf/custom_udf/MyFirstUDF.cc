@@ -18,20 +18,17 @@
 #include <velox/expression/VectorFunction.h>
 #include <velox/functions/Macros.h>
 #include <velox/functions/Registerer.h>
-#include <iostream>
 #include "udf/Udf.h"
-#include "udf/examples/UdfCommon.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec;
 
+// ---------------------------------------------------------------------------
+// UDF implementation
+// ---------------------------------------------------------------------------
+
 namespace {
 
-static const char* kInteger = "int";
-
-namespace mycustomudf {
-
-// A simple scalar function that adds 1 to an integer.
 template <typename T>
 struct AddOneFunction {
   VELOX_DEFINE_FUNCTION_TYPES(T);
@@ -41,71 +38,37 @@ struct AddOneFunction {
   }
 };
 
-// name: org.apache.spark.sql.custom.AddOne
-// signatures:
-//    int -> int
-// type: SimpleFunction
-class AddOneRegisterer final : public gluten::UdfRegisterer {
- public:
-  int getNumUdf() override {
-    return 1;
-  }
-
-  void populateUdfEntries(int& index, gluten::UdfEntry* udfEntries) override {
-    // Set `allowTypeConversion` for this udf.
-    udfEntries[index++] = {name_.c_str(), kInteger, 1, arg_, false, true};
-  }
-
-  void registerSignatures() override {
-    facebook::velox::registerFunction<AddOneFunction, int32_t, int32_t>({name_});
-  }
-
- private:
-  const std::string name_ = "org.apache.spark.sql.custom.AddOne";
-  const char* arg_[1] = {kInteger};
-};
-
-} // namespace mycustomudf
-
-std::vector<std::shared_ptr<gluten::UdfRegisterer>>& globalRegisters() {
-  static std::vector<std::shared_ptr<gluten::UdfRegisterer>> registerers;
-  return registerers;
-}
-
-void setupRegisterers() {
-  static bool inited = false;
-  if (inited) {
-    return;
-  }
-  auto& registerers = globalRegisters();
-  registerers.push_back(std::make_shared<mycustomudf::AddOneRegisterer>());
-  inited = true;
-}
 } // namespace
 
-DEFINE_GET_NUM_UDF {
-  setupRegisterers();
+// ---------------------------------------------------------------------------
+// Static UDF registry entries (no UdfRegisterer / UdfCommon.h needed)
+// ---------------------------------------------------------------------------
 
-  int numUdf = 0;
-  for (const auto& registerer : globalRegisters()) {
-    numUdf += registerer->getNumUdf();
-  }
-  return numUdf;
+static const char* kAddOneName = "org.apache.spark.sql.custom.AddOne";
+static const char* kInteger = "int";
+static const char* kAddOneArgs[] = {kInteger};
+
+static gluten::UdfEntry addOneEntry = {
+    kAddOneName,
+    kInteger,
+    /*numArgs=*/1,
+    kAddOneArgs,
+    /*variableArity=*/false,
+    /*allowTypeConversion=*/true};
+
+// ---------------------------------------------------------------------------
+// Gluten UDF interface
+// ---------------------------------------------------------------------------
+
+DEFINE_GET_NUM_UDF {
+  return 1;
 }
 
 DEFINE_GET_UDF_ENTRIES {
-  setupRegisterers();
-
-  int index = 0;
-  for (const auto& registerer : globalRegisters()) {
-    registerer->populateUdfEntries(index, udfEntries);
-  }
+  udfEntries[0] = addOneEntry;
 }
 
 DEFINE_REGISTER_UDF {
-  setupRegisterers();
-
-  for (const auto& registerer : globalRegisters()) {
-    registerer->registerSignatures();
-  }
+  facebook::velox::registerFunction<AddOneFunction, int32_t, int32_t>(
+      {kAddOneName});
 }
