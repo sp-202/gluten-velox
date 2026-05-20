@@ -183,10 +183,10 @@ RUN wget -q "https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/bina
 # Folly is required by Velox but not available in Ubuntu 22.04 apt repos.
 # We build it and install to /usr/local so CMake can find it.
 # ---------------------------------------------------------------------------
-RUN mkdir -p /tmp/folly-build && cd /tmp/folly-build && \
+RUN rm -rf /tmp/folly-build && mkdir -p /tmp/folly-build && cd /tmp/folly-build && \
     git clone --depth 1 https://github.com/facebook/folly.git && \
     cd folly && \
-    mkdir build && cd build && \
+    rm -rf build && mkdir -p build && cd build && \
     cmake .. \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_INSTALL_PREFIX=/usr/local \
