@@ -139,6 +139,9 @@ RUN apt-get update -y && \
       # Boost — required by Gluten CPP (core/CMakeLists.txt: find_package(Boost))
       # Velox uses its own internal Boost via FetchContent, no conflict here.
       libboost-all-dev \
+      # Folly — required by Velox (velox/CMakeLists.txt: find_package(Folly))
+      # Velox looks for FollyConfig.cmake; we build Folly from source after fetching it.
+      libfolly-dev \
       # NOTE: do NOT install libprotobuf-dev or protobuf-compiler here!
       # Velox and Arrow build their own bundled protobuf.
       # System protobuf conflicts with Velox's ORC pre-generated pb.h headers
