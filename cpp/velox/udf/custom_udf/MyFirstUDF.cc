@@ -85,34 +85,28 @@ void setupRegisterers() {
 } // namespace
 
 DEFINE_GET_NUM_UDF {
-  using std::begin;
-  using std::end;
   setupRegisterers();
-
+  auto& regs = globalRegisters();
   int numUdf = 0;
-  for (const auto& registerer : globalRegisters()) {
-    numUdf += registerer->getNumUdf();
+  for (std::size_t i = 0; i < regs.size(); ++i) {
+    numUdf += regs[i]->getNumUdf();
   }
   return numUdf;
 }
 
 DEFINE_GET_UDF_ENTRIES {
-  using std::begin;
-  using std::end;
   setupRegisterers();
-
+  auto& regs = globalRegisters();
   int index = 0;
-  for (const auto& registerer : globalRegisters()) {
-    registerer->populateUdfEntries(index, udfEntries);
+  for (std::size_t i = 0; i < regs.size(); ++i) {
+    regs[i]->populateUdfEntries(index, udfEntries);
   }
 }
 
 DEFINE_REGISTER_UDF {
-  using std::begin;
-  using std::end;
   setupRegisterers();
-
-  for (const auto& registerer : globalRegisters()) {
-    registerer->registerSignatures();
+  auto& regs = globalRegisters();
+  for (std::size_t i = 0; i < regs.size(); ++i) {
+    regs[i]->registerSignatures();
   }
 }
