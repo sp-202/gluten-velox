@@ -19,7 +19,6 @@
 #include <velox/functions/Macros.h>
 #include <velox/functions/Registerer.h>
 #include <iostream>
-#include <vector>
 #include "udf/Udf.h"
 #include "udf/examples/UdfCommon.h"
 
@@ -86,27 +85,27 @@ void setupRegisterers() {
 
 DEFINE_GET_NUM_UDF {
   setupRegisterers();
-  auto& regs = globalRegisters();
+
   int numUdf = 0;
-  for (std::size_t i = 0; i < regs.size(); ++i) {
-    numUdf += regs[i]->getNumUdf();
+  for (const auto& registerer : globalRegisters()) {
+    numUdf += registerer->getNumUdf();
   }
   return numUdf;
 }
 
 DEFINE_GET_UDF_ENTRIES {
   setupRegisterers();
-  auto& regs = globalRegisters();
+
   int index = 0;
-  for (std::size_t i = 0; i < regs.size(); ++i) {
-    regs[i]->populateUdfEntries(index, udfEntries);
+  for (const auto& registerer : globalRegisters()) {
+    registerer->populateUdfEntries(index, udfEntries);
   }
 }
 
 DEFINE_REGISTER_UDF {
   setupRegisterers();
-  auto& regs = globalRegisters();
-  for (std::size_t i = 0; i < regs.size(); ++i) {
-    regs[i]->registerSignatures();
+
+  for (const auto& registerer : globalRegisters()) {
+    registerer->registerSignatures();
   }
 }
