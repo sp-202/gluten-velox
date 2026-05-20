@@ -109,9 +109,12 @@ function build_arrow_java() {
 
     # Arrow JNI Date Interface CPP libraries
     export PKG_CONFIG_PATH="${INSTALL_PREFIX}"/lib64/pkgconfig:"${INSTALL_PREFIX}"/lib/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}
+    # Pass Boost_SOURCE=SYSTEM and BOOST_ROOT so Arrow's cpp-jni cmake uses the
+    # system-installed libboost-all-dev instead of downloading boost_ep from jfrog.
     ${MVN_CMD} generate-resources -Pgenerate-libs-jni-macos-linux -N -Darrow.dataset.jni.dist.dir=$ARROW_INSTALL_DIR \
       -DARROW_GANDIVA=OFF -DARROW_JAVA_JNI_ENABLE_GANDIVA=OFF -DARROW_ORC=OFF -DARROW_JAVA_JNI_ENABLE_ORC=OFF \
-	    -Dmaven.test.skip -Drat.skip -Dmaven.gitcommitid.skip -Dcheckstyle.skip -N
+      -DBoost_SOURCE=SYSTEM -DBOOST_ROOT=/usr \
+      -Dmaven.test.skip -Drat.skip -Dmaven.gitcommitid.skip -Dcheckstyle.skip -N
 
     # Arrow Java libraries
     ${MVN_CMD} install -Parrow-jni -P arrow-c-data -pl c,dataset -am \
