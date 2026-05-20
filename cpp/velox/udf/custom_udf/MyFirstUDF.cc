@@ -19,10 +19,13 @@
 #include <velox/functions/Macros.h>
 #include <velox/functions/Registerer.h>
 #include <iostream>
+#include <vector>
 #include "udf/Udf.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec;
+using std::begin;
+using std::end;
 
 namespace {
 
