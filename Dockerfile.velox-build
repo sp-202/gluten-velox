@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # =============================================================================
-# Gluten + Velox Backend Build Environment — COMPREHENSIVE
+# Gluten + Velox Backend Build Environment
 # =============================================================================
 # Target platform : linux/arm64 (AWS Graviton / aarch64)
 # Base OS         : Ubuntu 22.04
@@ -23,9 +23,9 @@
 # Scala           : 2.12
 # Spark           : 3.5.8 ONLY
 #
-# All dependencies are pre-installed here so that:
-#   --run_setup_script=OFF  can be passed to buildbundle-veloxbe.sh
-# This avoids Velox's setup script trying to apt-install inside the container.
+# Strategy: install only the packages NOT handled by Velox's setup-ubuntu.sh,
+# then pass --run_setup_script=ON so Velox installs its own deps (including
+# Folly which it builds via FetchContent, fizz, fbthrift, arrow, etc).
 # =============================================================================
 
 ARG TARGETPLATFORM=linux/arm64
@@ -69,85 +69,37 @@ ENV GLUTEN_HOME=/gluten
 WORKDIR ${GLUTEN_HOME}
 
 # ---------------------------------------------------------------------------
-# Step 1 — System packages (exact list from Velox's setup-ubuntu.sh)
+# Step 1 — Minimal system packages needed before Velox's setup script runs
 #
-# Sources:
-#   install_build_prerequisites()  → build-essential, ccache, ninja, git, etc.
-#   install_velox_deps_from_apt()  → libc-ares, libssl, glog, gflags, etc.
-#   setup-ubuntu.sh SVE check      → gcc-12, g++-12
-#   Arrow build                    → libprotobuf-dev, protobuf-compiler
-#   Gluten                         → sudo, clang-format-15, openjdk-17
+# We only install what Velox's setup-ubuntu.sh does NOT handle:
+#   - sudo (needed by the setup script itself)
+#   - openjdk-17 (needed by Maven/Gluten, not a Velox dep)
+#   - openjdk-8 (fallback JDK)
+#   - python3/pip/venv (needed by Gluten's check.py and uv install)
+#   - curl/wget/git (needed to fetch sources)
+#   - Maven prerequisites
+#   - Boost (Gluten CPP uses system Boost; Velox uses its own internal copy)
+#
+# Everything else (glog, gflags, gtest, re2, lz4, zstd, folly, arrow, etc.)
+# is handled by Velox's setup-ubuntu.sh via --run_setup_script=ON.
 # ---------------------------------------------------------------------------
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
-      # sudo — needed by Velox scripts (get-velox.sh, setup-ubuntu.sh)
       sudo \
-      # Core build toolchain
       build-essential \
-      gcc \
-      g++ \
-      gcc-12 \
-      g++-12 \
-      clang-15 \
-      clang-format-15 \
       git \
-      ninja-build \
-      ccache \
-      pkg-config \
-      libtool \
-      checkinstall \
-      # Python (Gluten check.py + uv for cmake install)
-      python3 \
-      python3-pip \
-      python3-venv \
       curl \
       wget \
       unzip \
       tar \
       patch \
-      # JDKs
+      python3 \
+      python3-pip \
+      python3-venv \
       openjdk-17-jdk \
       openjdk-8-jdk \
-      # -----------------------------------------------------------------------
-      # Velox deps from apt (install_velox_deps_from_apt in setup-ubuntu.sh)
-      # -----------------------------------------------------------------------
-      libc-ares-dev \
-      libcurl4-openssl-dev \
-      libssl-dev \
-      libicu-dev \
-      libdouble-conversion-dev \
-      libgoogle-glog-dev \
-      libbz2-dev \
-      libgflags-dev \
-      libgtest-dev \
-      libgmock-dev \
-      libevent-dev \
-      liblz4-dev \
-      libzstd-dev \
-      libre2-dev \
-      libsnappy-dev \
-      libsodium-dev \
-      libelf-dev \
-      libdwarf-dev \
-      libunwind-dev \
-      bison \
-      flex \
-      libfl-dev \
-      tzdata \
-      libxxhash-dev \
-      libxml2-dev \
-      # Boost — required by Gluten CPP (core/CMakeLists.txt: find_package(Boost))
-      # Velox uses its own internal Boost via FetchContent, no conflict here.
       libboost-all-dev \
-      # NOTE: do NOT install libprotobuf-dev or protobuf-compiler here!
-      # Velox and Arrow build their own bundled protobuf.
-      # System protobuf conflicts with Velox's ORC pre-generated pb.h headers
-      # which use removed protobuf 3.x APIs (UnsafeArenaRelease, PROTOBUF_ULONGLONG).
-      # zlib
-      zlib1g-dev \
-      # autotools (some thirdparty builds with autoconf)
-      autoconf \
-      automake \
+      tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
@@ -179,26 +131,7 @@ RUN wget -q "https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/bina
     mvn -version
 
 # ---------------------------------------------------------------------------
-# Step 5 — Build and install Folly from source
-# Folly is required by Velox but not available in Ubuntu 22.04 apt repos.
-# We build it and install to /usr/local so CMake can find it.
-# ---------------------------------------------------------------------------
-RUN rm -rf /tmp/folly-build && mkdir -p /tmp/folly-build && cd /tmp/folly-build && \
-    git clone --depth 1 https://github.com/facebook/folly.git && \
-    cd folly && \
-    rm -rf build && mkdir -p build && cd build && \
-    cmake .. \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_INSTALL_PREFIX=/usr/local \
-      -DBUILD_TESTS=OFF \
-      -DBUILD_BENCHMARKS=OFF && \
-    cmake --build . -j $(nproc) && \
-    cmake --install . && \
-    cd / && rm -rf /tmp/folly-build && \
-    echo "Folly installed successfully to /usr/local"
-
-# ---------------------------------------------------------------------------
-# Step 6 — Set Java 17 as default
+# Step 5 — Set Java 17 as default
 # ---------------------------------------------------------------------------
 RUN update-alternatives --set java /usr/lib/jvm/java-17-openjdk-arm64/bin/java || true
 ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64
@@ -206,7 +139,7 @@ ENV PATH=${JAVA_HOME}/bin:${PATH}
 RUN java -version && cmake --version
 
 # ---------------------------------------------------------------------------
-# Step 7 — Copy Gluten-Velox source
+# Step 6 — Copy Gluten-Velox source
 #   When running via docker-build.sh the source is bind-mounted at runtime.
 #   This COPY is for self-contained CI builds (docker build → docker push).
 # ---------------------------------------------------------------------------
@@ -214,15 +147,17 @@ COPY . ${GLUTEN_HOME}/
 RUN find ${GLUTEN_HOME} -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
-# Step 8 — Build environment variables
+# Step 7 — Build environment variables
 # ---------------------------------------------------------------------------
 ENV NUM_THREADS=${NUM_THREADS}
 ENV SPARK_VERSION=3.5
 ENV CPU_TARGET=aarch64
 
 # ---------------------------------------------------------------------------
-# Step 9 — Default CMD
-#   --run_setup_script=OFF : skip Velox's apt installs — we did them above
+# Step 8 — Default CMD
+#   --run_setup_script=ON : let Velox's setup-ubuntu.sh install its own deps
+#   (Folly, fizz, fbthrift, arrow, re2, glog, gflags, etc. are all handled
+#    by Velox's setup script — we must NOT try to pre-install them)
 # ---------------------------------------------------------------------------
 CMD ["/bin/bash", "-c", \
      "set -e && \
@@ -239,7 +174,7 @@ CMD ["/bin/bash", "-c", \
       export CPU_TARGET=aarch64 && \
       ./dev/buildbundle-veloxbe.sh \
         --spark_version=3.5 \
-        --run_setup_script=OFF && \
+        --run_setup_script=ON && \
       echo '' && \
       echo '=====================================================' && \
       echo ' BUILD COMPLETE! (Spark 3.5.8)' && \
