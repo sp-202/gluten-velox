@@ -241,8 +241,7 @@ function build_gluten_cpp {
     sudo apt-get update -y && sudo apt-get install -y --no-install-recommends libprotobuf-dev protobuf-compiler
   fi
   cd $GLUTEN_DIR/cpp
-  rm -rf build
-  mkdir build
+  mkdir -p build
   cd build
 
   GLUTEN_CMAKE_OPTIONS="-DBUILD_VELOX_BACKEND=ON \

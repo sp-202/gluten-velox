@@ -21,6 +21,7 @@
 #include <iostream>
 #include <vector>
 #include "udf/Udf.h"
+#include "udf/examples/UdfCommon.h"
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec;

@@ -231,6 +231,8 @@ DOCKER_RUN_ARGS=(
   # a code-server container (host path differs from container-internal path).
   # Bind-mount output dir so JARs come back to the host after build
   -v "${OUTPUT_DIR}:/output"
+  # Named volume for Maven local repo — persists between runs so deps aren't re-downloaded
+  -v "gluten-m2-cache:/root/.m2"
   -w /gluten
 )
 
