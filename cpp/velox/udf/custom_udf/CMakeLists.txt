@@ -15,3 +15,9 @@
 
 add_library(myfirstudf SHARED "MyFirstUDF.cc")
 target_link_libraries(myfirstudf velox)
+
+# Geospatial UDF library: ST_* functions backed by Velox's GEOS implementation.
+# Requires Velox built with VELOX_ENABLE_GEO=ON (set in build-velox.sh).
+# Geometry is stored as varbinary (Velox's internal binary format).
+add_library(geospatialudf SHARED "GeospatialUDF.cc")
+target_link_libraries(geospatialudf velox)
