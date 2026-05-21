@@ -98,11 +98,44 @@ if [[ "${SKIP_SETUP}" == "false" ]]; then
     tzdata
 
   # Remove system gflags/glog — the apt ARM64 packages lack -fPIC and will
-  # cause R_AARCH64_ADR_PREL_PG_HI21 linker errors when building libvelox.so.
-  # Velox and Gluten both build their own gflags/glog from source (BUNDLED),
-  # so we don't need the system versions at all.
+  # cause R_AARCH64_ADR_PREL_PG_HI21 linker errors when building libvelox.so,
+  # and Gluten CPP's find_package(glog) will pick them up and fail to link.
   sudo apt-get remove -y libgflags-dev libgflags2.2 libgoogle-glog-dev 2>/dev/null || true
   sudo apt-mark hold libgflags-dev libgflags2.2 2>/dev/null || true
+
+  # ---------------------------------------------------------------------------
+  # Step 2 — Build gflags from source with -fPIC
+  # The apt ARM64 package is not compiled with -fPIC; build from source so
+  # glog (below) and any downstream find_package(gflags) work correctly.
+  # ---------------------------------------------------------------------------
+  echo ""
+  echo ">>> [2/4] Building gflags from source (with -fPIC)..."
+  rm -rf /tmp/gflags-src /tmp/gflags-build
+  git clone --depth=1 --branch=v2.2.2 https://github.com/gflags/gflags.git /tmp/gflags-src
+  cmake -S /tmp/gflags-src -B /tmp/gflags-build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DBUILD_TESTING=OFF
+  cmake --build /tmp/gflags-build -j"${NUM_THREADS}"
+  sudo cmake --install /tmp/gflags-build
+
+  # ---------------------------------------------------------------------------
+  # Step 3 — Build glog from source with -fPIC
+  # Velox bundles glog internally but does not install it to a searchable
+  # prefix, so Gluten CPP's find_package(glog) fails unless we install it here.
+  # ---------------------------------------------------------------------------
+  echo ""
+  echo ">>> [3/4] Building glog from source (with -fPIC)..."
+  rm -rf /tmp/glog-src /tmp/glog-build
+  git clone --depth=1 --branch=v0.6.0 https://github.com/google/glog.git /tmp/glog-src
+  cmake -S /tmp/glog-src -B /tmp/glog-build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DWITH_GTEST=OFF
+  cmake --build /tmp/glog-build -j"${NUM_THREADS}"
+  sudo cmake --install /tmp/glog-build
 fi   # end SKIP_SETUP=false
 
 # ---------------------------------------------------------------------------
@@ -140,7 +173,7 @@ fi
 # undo our -fPIC builds.
 # ---------------------------------------------------------------------------
 echo ""
-echo ">>> [2/3] Building Velox + Arrow + Gluten CPP + Maven JAR..."
+echo ">>> [4/4] Building Velox + Arrow + Gluten CPP + Maven JAR..."
 echo "    Spark version : ${SPARK_VERSION}"
 echo "    This will take ~60-90 min on first run."
 echo ""
@@ -156,7 +189,7 @@ cd "${SCRIPT_DIR}"
 # Step 5 — Collect JARs
 # ---------------------------------------------------------------------------
 echo ""
-echo ">>> [3/3] Collecting output JARs..."
+echo ">>> Collecting output JARs..."
 mkdir -p "${OUTPUT_DIR}"
 find "${SCRIPT_DIR}/package/target/" -name "*.jar" \
   ! -name "*sources*" ! -name "*javadoc*" \
