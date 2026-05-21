@@ -237,8 +237,15 @@ function build_velox {
 function build_gluten_cpp {
   echo "Start to build Gluten CPP"
   if [ -f /etc/debian_version ]; then
-    echo "Installing system protobuf for Gluten CPP build..."
-    sudo apt-get update -y && sudo apt-get install -y --no-install-recommends libprotobuf-dev protobuf-compiler
+    if [[ "$(uname -m)" == "aarch64" ]]; then
+      # ARM64 Ubuntu: the apt libprotobuf.a is not compiled with -fPIC and causes
+      # R_AARCH64_ADR_PREL_PG_HI21 linker errors when building libgluten.so.
+      # build-native.sh builds protobuf from source (with -fPIC) during setup.
+      echo "ARM64: skipping apt protobuf install; using source-built /usr/local install"
+    else
+      echo "Installing system protobuf for Gluten CPP build..."
+      sudo apt-get update -y && sudo apt-get install -y --no-install-recommends libprotobuf-dev protobuf-compiler
+    fi
   fi
   cd $GLUTEN_DIR/cpp
   mkdir -p build

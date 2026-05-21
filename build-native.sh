@@ -8,7 +8,7 @@
 #   ./build-native.sh --threads=8  # override thread count
 #   ./build-native.sh --spark=3.4  # different Spark version
 #   ./build-native.sh --setup-only # install deps and stop
-#   ./build-native.sh --skip-setup # skip apt/gflags/glog, go straight to build
+#   ./build-native.sh --skip-setup # skip apt/gflags/glog/protobuf, go straight to build
 #
 # Run as a non-root user that has passwordless sudo, OR as root.
 # Output JAR lands in ./output/
@@ -62,14 +62,15 @@ echo "============================================================"
 # Step 1 — System packages
 #
 # Ubuntu 24.04 (noble) ships GCC 13 by default — that's what we use.
-# We deliberately do NOT install libgflags-dev or libgoogle-glog-dev from apt:
-#   - Ubuntu 24.04 ARM64 libgflags.a is NOT compiled with -fPIC → linker error
-#     when building libvelox.so (R_AARCH64_ADR_PREL_PG_HI21 relocation error)
-#   - We build both from source below so we control the -fPIC flag
+# We deliberately do NOT install libgflags-dev, libgoogle-glog-dev, or
+# libprotobuf-dev from apt:
+#   - Ubuntu 24.04 ARM64 static libs are NOT compiled with -fPIC → linker error
+#     R_AARCH64_ADR_PREL_PG_HI21 when building libgluten.so / libvelox.so
+#   - We build all three from source below so we control the -fPIC flag
 # ---------------------------------------------------------------------------
 if [[ "${SKIP_SETUP}" == "false" ]]; then
   echo ""
-  echo ">>> [1/3] Installing system packages..."
+  echo ">>> [1/5] Installing system packages..."
   sudo apt-get update -y
   sudo apt-get install -y --no-install-recommends \
     build-essential \
@@ -98,11 +99,16 @@ if [[ "${SKIP_SETUP}" == "false" ]]; then
     libdw-dev \
     tzdata
 
-  # Remove system gflags/glog — the apt ARM64 packages lack -fPIC and will
-  # cause R_AARCH64_ADR_PREL_PG_HI21 linker errors when building libvelox.so,
-  # and Gluten CPP's find_package(glog) will pick them up and fail to link.
-  sudo apt-get remove -y libgflags-dev libgflags2.2 libgoogle-glog-dev 2>/dev/null || true
-  sudo apt-mark hold libgflags-dev libgflags2.2 2>/dev/null || true
+  # Remove system gflags/glog/protobuf — the apt ARM64 packages lack -fPIC
+  # and cause R_AARCH64_ADR_PREL_PG_HI21 linker errors.  Hold them so that
+  # build_gluten_cpp's inner apt-get install can't re-introduce them.
+  sudo apt-get remove -y \
+    libgflags-dev libgflags2.2 \
+    libgoogle-glog-dev \
+    libprotobuf-dev libprotobuf-lite23 protobuf-compiler 2>/dev/null || true
+  sudo apt-mark hold \
+    libgflags-dev libgflags2.2 \
+    libprotobuf-dev libprotobuf-lite23 protobuf-compiler 2>/dev/null || true
 
   # ---------------------------------------------------------------------------
   # Step 2 — Build gflags from source with -fPIC
@@ -110,7 +116,7 @@ if [[ "${SKIP_SETUP}" == "false" ]]; then
   # glog (below) and any downstream find_package(gflags) work correctly.
   # ---------------------------------------------------------------------------
   echo ""
-  echo ">>> [2/4] Building gflags from source (with -fPIC)..."
+  echo ">>> [2/5] Building gflags from source (with -fPIC)..."
   rm -rf /tmp/gflags-src /tmp/gflags-build
   git clone --depth=1 --branch=v2.2.2 https://github.com/gflags/gflags.git /tmp/gflags-src
   cmake -S /tmp/gflags-src -B /tmp/gflags-build \
@@ -127,7 +133,7 @@ if [[ "${SKIP_SETUP}" == "false" ]]; then
   # prefix, so Gluten CPP's find_package(glog) fails unless we install it here.
   # ---------------------------------------------------------------------------
   echo ""
-  echo ">>> [3/4] Building glog from source (with -fPIC)..."
+  echo ">>> [3/5] Building glog from source (with -fPIC)..."
   rm -rf /tmp/glog-src /tmp/glog-build
   git clone --depth=1 --branch=v0.6.0 https://github.com/google/glog.git /tmp/glog-src
   cmake -S /tmp/glog-src -B /tmp/glog-build \
@@ -137,6 +143,27 @@ if [[ "${SKIP_SETUP}" == "false" ]]; then
     -DWITH_GTEST=OFF
   cmake --build /tmp/glog-build -j"${NUM_THREADS}"
   sudo cmake --install /tmp/glog-build
+
+  # ---------------------------------------------------------------------------
+  # Step 4 — Build protobuf from source with -fPIC
+  # Ubuntu 24.04 ARM64 libprotobuf.a lacks -fPIC; linking it into libgluten.so
+  # causes R_AARCH64_ADR_PREL_PG_HI21 relocation errors at link time.
+  # build_gluten_cpp in builddeps-veloxbe.sh normally installs libprotobuf-dev
+  # from apt — we skip that on ARM64 (see the guard there) and use this instead.
+  # ---------------------------------------------------------------------------
+  echo ""
+  echo ">>> [4/5] Building protobuf from source (with -fPIC)..."
+  rm -rf /tmp/protobuf-src /tmp/protobuf-build
+  git clone --depth=1 --branch=v3.21.12 \
+    https://github.com/protocolbuffers/protobuf.git /tmp/protobuf-src
+  cmake -S /tmp/protobuf-src -B /tmp/protobuf-build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    -DBUILD_SHARED_LIBS=OFF \
+    -Dprotobuf_BUILD_TESTS=OFF \
+    -Dprotobuf_BUILD_EXAMPLES=OFF
+  cmake --build /tmp/protobuf-build -j"${NUM_THREADS}"
+  sudo cmake --install /tmp/protobuf-build
 fi   # end SKIP_SETUP=false
 
 # ---------------------------------------------------------------------------
@@ -174,7 +201,7 @@ fi
 # undo our -fPIC builds.
 # ---------------------------------------------------------------------------
 echo ""
-echo ">>> [4/4] Building Velox + Arrow + Gluten CPP + Maven JAR..."
+echo ">>> [5/5] Building Velox + Arrow + Gluten CPP + Maven JAR..."
 echo "    Spark version : ${SPARK_VERSION}"
 echo "    This will take ~60-90 min on first run."
 echo ""
