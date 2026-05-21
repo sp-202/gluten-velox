@@ -95,6 +95,7 @@ if [[ "${SKIP_SETUP}" == "false" ]]; then
     libsodium-dev \
     libelf-dev \
     libdwarf-dev \
+    libdw-dev \
     tzdata
 
   # Remove system gflags/glog — the apt ARM64 packages lack -fPIC and will
