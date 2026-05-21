@@ -244,9 +244,15 @@ function build_gluten_cpp {
   mkdir -p build
   cd build
 
+  # Velox builds Folly internally; point CMAKE_PREFIX_PATH at the Velox build
+  # tree so Gluten's find_package(Folly REQUIRED CONFIG) can locate it.
+  VELOX_BUILD_TYPE=$(echo "$BUILD_TYPE" | tr '[:upper:]' '[:lower:]')
+  VELOX_BUILD_PATH="${VELOX_HOME}/_build/${VELOX_BUILD_TYPE}"
+
   GLUTEN_CMAKE_OPTIONS="-DBUILD_VELOX_BACKEND=ON \
     -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
     -DVELOX_HOME=$VELOX_HOME \
+    -DCMAKE_PREFIX_PATH=${VELOX_BUILD_PATH} \
     -DBUILD_TESTS=$BUILD_TESTS \
     -DBUILD_EXAMPLES=$BUILD_EXAMPLES \
     -DBUILD_BENCHMARKS=$BUILD_BENCHMARKS \
