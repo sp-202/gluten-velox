@@ -186,6 +186,36 @@ function compile {
         sudo cmake --install googletest-build/
       fi
     fi
+    if [ -d folly-build ]; then
+      # folly-no-export.patch comments out install(TARGETS) and install(EXPORT),
+      # so cmake --install only delivers FollyConfig.cmake + folly-config.h.
+      # We then write a stub folly-targets.cmake so Gluten CPP's
+      # find_package(Folly REQUIRED CONFIG) can define Folly::folly.
+      # The actual Folly code is compiled into libvelox.a (VELOX_MONO_LIBRARY=ON).
+      echo "INSTALL Folly cmake config files."
+      FOLLY_DEPS_DIR="$(pwd)"
+      if [ $OS == 'Linux' ]; then
+        sudo cmake --install folly-build/ || true
+      elif [ $OS == 'Darwin' ]; then
+        sudo cmake --install folly-build/ || true
+      fi
+      FOLLY_CMAKE_DIR=/usr/local/lib/cmake/folly
+      if [ -d "${FOLLY_CMAKE_DIR}" ] && [ ! -f "${FOLLY_CMAKE_DIR}/folly-targets.cmake" ]; then
+        sudo tee "${FOLLY_CMAKE_DIR}/folly-targets.cmake" > /dev/null << FOLLY_EOF
+# Stub: Folly is compiled into libvelox.a (VELOX_MONO_LIBRARY=ON).
+# folly-no-export.patch removed the real targets file to avoid install conflicts.
+if(NOT TARGET Folly::folly)
+  add_library(Folly::folly INTERFACE IMPORTED)
+  set_target_properties(Folly::folly PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES
+      "/usr/local/include;${FOLLY_DEPS_DIR}/folly-src;${FOLLY_DEPS_DIR}/folly-build")
+endif()
+if(NOT TARGET Folly::folly_test_util)
+  add_library(Folly::folly_test_util INTERFACE IMPORTED)
+endif()
+FOLLY_EOF
+      fi
+    fi
   fi
 }
 
