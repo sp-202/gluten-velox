@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 include_guard(GLOBAL)
+include(FetchContent)
 
 set(GLUTEN_GLOG_BUILD_SHA256_CHECKSUM
     8a83bf982f37bb70825df71a9709fa90ea9f4447fb3c099e1d720a439d88bad6)
