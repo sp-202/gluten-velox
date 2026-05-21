@@ -57,14 +57,9 @@ set_target_properties(
                           IMPORTED_LOCATION "${GLOG_LIBRARY}")
 
 set(GLUTEN_GFLAGS_VERSION 2.2.2)
-find_package(gflags ${GLUTEN_GFLAGS_VERSION} CONFIG
-             COMPONENTS ${libgflags_component})
-
-if(NOT gflags_FOUND AND glog_FOUND)
-  message(
-    FATAL_ERROR
-      "Glog found but Gflags not found. Set BUILD_GLOG=ON and reload cmake.")
-endif()
+# Skip system gflags: Ubuntu 22.04 ARM64 libgflags.a is not compiled with
+# -fPIC and cannot be linked into a shared library. Always build from source.
+set(gflags_FOUND FALSE)
 
 if(gflags_FOUND)
   if(NOT TARGET gflags::gflags_${libgflags_component}
