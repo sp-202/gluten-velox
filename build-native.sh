@@ -82,7 +82,6 @@ if [[ "${SKIP_SETUP}" == "false" ]]; then
     openjdk-17-jdk \
     maven \
     libboost-all-dev \
-    libgeos-dev \
     libssl-dev \
     libcurl4-openssl-dev \
     libdouble-conversion-dev \
