@@ -93,6 +93,7 @@ RUN apt-get update -y && \
       libgeos-dev \
       libgoogle-glog-dev \
       tzdata \
+    && (apt-get remove -y libgflags-dev || true) \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
