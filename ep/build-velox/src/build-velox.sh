@@ -153,6 +153,10 @@ function compile {
 
   export simdjson_SOURCE=AUTO
   export Arrow_SOURCE=AUTO
+  # Force Velox to build gflags from source (BUNDLED) rather than picking up
+  # the system /usr/local install, which may be missing the 'shared' component
+  # that Velox's ResolveDependency.cmake requires on ARM64 Ubuntu 24.04.
+  export gflags_SOURCE=BUNDLED
   if [ $ARCH == 'x86_64' ]; then
     make $COMPILE_TYPE $NUM_THREADS_OPTS EXTRA_CMAKE_FLAGS="${COMPILE_OPTION}"
   elif [[ "$ARCH" == 'arm64' || "$ARCH" == 'aarch64' || "$ARCH" == "ppc64le" ]]; then

@@ -69,7 +69,7 @@ echo "============================================================"
 # ---------------------------------------------------------------------------
 if [[ "${SKIP_SETUP}" == "false" ]]; then
   echo ""
-  echo ">>> [1/5] Installing system packages..."
+  echo ">>> [1/3] Installing system packages..."
   sudo apt-get update -y
   sudo apt-get install -y --no-install-recommends \
     build-essential \
@@ -98,73 +98,12 @@ if [[ "${SKIP_SETUP}" == "false" ]]; then
     libdwarf-dev \
     tzdata
 
-  # Pin gflags and glog so apt cannot reinstall the broken system versions
-  # (libboost or other transitive deps can silently pull them back in)
+  # Remove system gflags/glog — the apt ARM64 packages lack -fPIC and will
+  # cause R_AARCH64_ADR_PREL_PG_HI21 linker errors when building libvelox.so.
+  # Velox and Gluten both build their own gflags/glog from source (BUNDLED),
+  # so we don't need the system versions at all.
+  sudo apt-get remove -y libgflags-dev libgflags2.2 libgoogle-glog-dev 2>/dev/null || true
   sudo apt-mark hold libgflags-dev libgflags2.2 2>/dev/null || true
-  sudo apt-get remove -y libgflags-dev libgoogle-glog-dev 2>/dev/null || true
-
-  # ---------------------------------------------------------------------------
-  # Step 2 — Build gflags from source WITH -fPIC
-  #
-  # The Ubuntu 24.04 ARM64 apt package of libgflags.a is compiled WITHOUT
-  # -fPIC. When the linker tries to include it in libvelox.so it fails with:
-  #   relocation R_AARCH64_ADR_PREL_PG_HI21 cannot be used when making a
-  #   shared object; recompile with -fPIC
-  # Building from source with CMAKE_POSITION_INDEPENDENT_CODE=ON fixes this.
-  # We install to /usr/local so it takes precedence over /usr/lib at link time.
-  # ---------------------------------------------------------------------------
-  echo ""
-  echo ">>> [2/5] Building gflags 2.2.2 from source with -fPIC..."
-  cd /tmp
-  rm -rf gflags-src
-  git clone -b v2.2.2 --depth 1 https://github.com/gflags/gflags.git gflags-src
-  cd gflags-src
-  mkdir -p build && cd build
-  cmake .. \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-    -DBUILD_SHARED_LIBS=OFF \
-    -DGFLAGS_BUILD_STATIC_LIBS=ON \
-    -DGFLAGS_BUILD_SHARED_LIBS=ON \
-    -DGFLAGS_NAMESPACE="google;gflags" \
-    -DCMAKE_CXX_FLAGS="-fPIC" \
-    -DCMAKE_INSTALL_PREFIX=/usr/local
-  make -j"${NUM_THREADS}"
-  sudo make install
-  sudo ldconfig
-  rm -rf /tmp/gflags-src
-  echo "    gflags installed to /usr/local — verifying -fPIC..."
-  # Confirm the .a has relocatable code (no absolute relocs)
-  objdump -r /usr/local/lib/libgflags.a 2>/dev/null | grep -c "R_AARCH64_ADR_PREL" && \
-    echo "WARNING: still seeing non-PIC relocations" || echo "    OK — gflags is -fPIC clean"
-
-  # ---------------------------------------------------------------------------
-  # Step 3 — Build glog from source (depends on gflags above)
-  #
-  # glog must be built AFTER gflags so it links our -fPIC gflags.
-  # System libgoogle-glog-dev on Ubuntu 24.04 links against the broken apt
-  # gflags, so we build glog from source too.
-  # ---------------------------------------------------------------------------
-  echo ""
-  echo ">>> [3/5] Building glog 0.6.0 from source..."
-  cd /tmp
-  rm -rf glog-src
-  git clone -b v0.6.0 --depth 1 https://github.com/google/glog.git glog-src
-  cd glog-src
-  mkdir -p build && cd build
-  cmake .. \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-    -DBUILD_SHARED_LIBS=OFF \
-    -DWITH_UNWIND=OFF \
-    -DBUILD_TESTING=OFF \
-    -DCMAKE_CXX_FLAGS="-fPIC" \
-    -DCMAKE_INSTALL_PREFIX=/usr/local
-  make -j"${NUM_THREADS}"
-  sudo make install
-  sudo ldconfig
-  rm -rf /tmp/glog-src
-  echo "    glog installed to /usr/local"
 fi   # end SKIP_SETUP=false
 
 # ---------------------------------------------------------------------------
@@ -202,7 +141,7 @@ fi
 # undo our -fPIC builds.
 # ---------------------------------------------------------------------------
 echo ""
-echo ">>> [4/5] Building Velox + Arrow + Gluten CPP + Maven JAR..."
+echo ">>> [2/3] Building Velox + Arrow + Gluten CPP + Maven JAR..."
 echo "    Spark version : ${SPARK_VERSION}"
 echo "    This will take ~60-90 min on first run."
 echo ""
@@ -218,7 +157,7 @@ cd "${SCRIPT_DIR}"
 # Step 5 — Collect JARs
 # ---------------------------------------------------------------------------
 echo ""
-echo ">>> [5/5] Collecting output JARs..."
+echo ">>> [3/3] Collecting output JARs..."
 mkdir -p "${OUTPUT_DIR}"
 find "${SCRIPT_DIR}/package/target/" -name "*.jar" \
   ! -name "*sources*" ! -name "*javadoc*" \
