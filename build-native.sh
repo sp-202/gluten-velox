@@ -22,7 +22,7 @@ OUTPUT_DIR="${SCRIPT_DIR}/output"
 # Defaults — tuned for r7g.4xlarge (16 vCPU / 128 GB)
 # Leave 2 cores for the OS; 14 compile threads is safe with 128 GB.
 # ---------------------------------------------------------------------------
-NUM_THREADS=${NUM_THREADS:-14}
+NUM_THREADS=${NUM_THREADS:-16}
 SPARK_VERSION="3.5"
 SETUP_ONLY=false
 SKIP_SETUP=false
