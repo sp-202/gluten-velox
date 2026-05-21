@@ -77,7 +77,7 @@ if [[ "${SKIP_SETUP}" == "false" ]]; then
     git curl wget unzip tar patch \
     ninja-build ccache pkg-config \
     cmake \
-    libtool autoconf automake bison flex \
+    libtool autoconf automake bison flex libfl-dev \
     python3 python3-pip python3-venv \
     openjdk-17-jdk \
     maven \
