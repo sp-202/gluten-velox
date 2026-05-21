@@ -22,11 +22,17 @@ set(GLUTEN_GLOG_SOURCE_URL
 
 resolve_dependency_url(GLOG)
 
+# resolve_dependency_url prepends "SHA256=" to the checksum variable.
+# FetchContent_Declare/ExternalProject_Add in CMake >=3.30 re-prepends it,
+# causing "SHA256=SHA256=..." errors. Strip it back to the bare hex hash.
+string(REPLACE "SHA256=" "" GLUTEN_GLOG_BUILD_SHA256_CHECKSUM
+       "${GLUTEN_GLOG_BUILD_SHA256_CHECKSUM}")
+
 message(STATUS "Building glog from source")
 FetchContent_Declare(
   glog
   URL ${GLUTEN_GLOG_SOURCE_URL}
-  URL_HASH SHA256=${GLUTEN_GLOG_BUILD_SHA256_CHECKSUM}
+  URL_HASH "SHA256=${GLUTEN_GLOG_BUILD_SHA256_CHECKSUM}"
   PATCH_COMMAND git apply ${CMAKE_CURRENT_LIST_DIR}/glog/glog-no-export.patch
                 && git apply ${CMAKE_CURRENT_LIST_DIR}/glog/glog-config.patch)
 

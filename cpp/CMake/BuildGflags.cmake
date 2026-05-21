@@ -25,11 +25,17 @@ string(CONCAT GLUTEN_GFLAGS_SOURCE_URL
 
 resolve_dependency_url(GFLAGS)
 
+# resolve_dependency_url prepends "SHA256=" to the checksum variable.
+# FetchContent_Declare/ExternalProject_Add in CMake >=3.30 re-prepends it,
+# causing "SHA256=SHA256=..." errors. Strip it back to the bare hex hash.
+string(REPLACE "SHA256=" "" GLUTEN_GFLAGS_BUILD_SHA256_CHECKSUM
+       "${GLUTEN_GFLAGS_BUILD_SHA256_CHECKSUM}")
+
 message(STATUS "Building gflags from source")
 FetchContent_Declare(
   gflags
   URL ${GLUTEN_GFLAGS_SOURCE_URL}
-  URL_HASH SHA256=${GLUTEN_GFLAGS_BUILD_SHA256_CHECKSUM})
+  URL_HASH "SHA256=${GLUTEN_GFLAGS_BUILD_SHA256_CHECKSUM}")
 
 set(GFLAGS_BUILD_STATIC_LIBS ON)
 set(GFLAGS_BUILD_SHARED_LIBS ON)

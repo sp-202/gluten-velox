@@ -31,7 +31,7 @@
 # =============================================================================
 
 ARG TARGETPLATFORM=linux/arm64
-ARG NUM_THREADS=4
+ARG NUM_THREADS=12
 ARG CMAKE_VERSION=3.30.4
 ARG MAVEN_VERSION=3.9.6
 
@@ -164,7 +164,7 @@ FROM velox-base AS gluten-velox-builder
 LABEL stage="gluten-velox-builder"
 LABEL description="Gluten + Velox final build (ARM64/Graviton, Spark 3.5.8)"
 
-ARG NUM_THREADS=4
+ARG NUM_THREADS=12
 ENV NUM_THREADS=${NUM_THREADS}
 
 # ---------------------------------------------------------------------------
