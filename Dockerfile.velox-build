@@ -91,6 +91,7 @@ RUN apt-get update -y && \
       openjdk-8-jdk \
       libboost-all-dev \
       libgeos-dev \
+      libgoogle-glog-dev \
       tzdata \
     && rm -rf /var/lib/apt/lists/*
 
