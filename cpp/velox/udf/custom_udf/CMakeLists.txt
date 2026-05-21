@@ -20,4 +20,12 @@ target_link_libraries(myfirstudf velox)
 # Requires Velox built with VELOX_ENABLE_GEO=ON (set in build-velox.sh).
 # Geometry is stored as varbinary (Velox's internal binary format).
 add_library(geospatialudf SHARED "GeospatialUDF.cc")
-target_link_libraries(geospatialudf velox)
+# external::geos is defined in cpp/velox/CMakeLists.txt — either the system GEOS
+# package or Velox's bundled libgeos.a. Linking it directly gives us both the
+# library and (via GEOS::geos) the include dirs when a system package is found.
+# For the bundled case, we add the Velox build include path explicitly.
+target_link_libraries(geospatialudf velox external::geos)
+# Velox installs GEOS headers to /usr/local/include/geos during its build.
+# The import_library() path for bundled GEOS does not propagate include dirs,
+# so we add it explicitly here.
+target_include_directories(geospatialudf SYSTEM PRIVATE /usr/local/include)
