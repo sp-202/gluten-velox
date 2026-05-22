@@ -42,6 +42,9 @@ set(GFLAGS_BUILD_SHARED_LIBS ON)
 set(GFLAGS_BUILD_gflags_LIB ON)
 # glog relies on the old `google` namespace
 set(GFLAGS_NAMESPACE "google;gflags")
+# Required so gflags_static is compiled with -fPIC and can be linked into
+# libgluten.so without R_X86_64_PC32 / R_AARCH64_ADR_PREL_PG_HI21 relocation errors.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 FetchContent_MakeAvailable(gflags)
 
