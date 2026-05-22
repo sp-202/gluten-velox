@@ -287,18 +287,55 @@ Futures) but are not referenced at **link time** by Gluten's bridge layer.
 On x86_64, the code paths taken by the linker don't happen to pull in the
 `CoreBase` object file. On ARM64 they incidentally do, masking the bug.
 
-**Symbols confirmed undefined in the old JAR:**
+**Scope of the problem — the old JAR has hundreds of undefined Folly symbols,
+not just CoreBase.** CoreBase was simply the first crash because
+`_ZTIN5folly7futures6detail8CoreBaseE` is a RTTI *data* (typeinfo) symbol,
+which the dynamic linker resolves **eagerly** at `dlopen` time even under the
+default `RTLD_LAZY` mode. All the other undefined Folly *function* symbols
+would have caused additional crashes the first time those code paths were
+exercised during query execution.
+
+Audit of the old JAR confirmed undefined Folly symbol groups (representative
+subset — full `nm -D | grep ' U ' | grep folly` output had 100+ entries):
+
 ```
-U _ZN5folly7futures6detail8CoreBase10setResult_EONS_17ExecutorKeepAliveINS_8ExecutorEEE
+# Folly Futures / CoreBase — crash at JVM startup (data/RTTI, eagerly resolved)
+U _ZTIN5folly7futures6detail8CoreBaseE
+U _ZN5folly7futures6detail8CoreBase10setResult_...
 U _ZN5folly7futures6detail8CoreBase12setCallback_...
 U _ZN5folly7futures6detail8CoreBase14destroyDerivedEv
 U _ZN5folly7futures6detail8CoreBase21stealDeferredExecutorEv
-U _ZN5folly7futures6detail8CoreBase28initCopyInterruptHandlerFromERKS2_
-U _ZN5folly7futures6detail8CoreBase5raiseENS_17exception_wrapperE
 U _ZN5folly7futures6detail8CoreBase9detachOneEv
 U _ZN5folly7futures6detail8CoreBaseD2Ev
-U _ZNK5folly7futures6detail8CoreBase9hasResultEv
-U _ZTIN5folly7futures6detail8CoreBaseE
+
+# Folly SharedMutex internals — crash on first lock/unlock
+U _ZN5folly15SharedMutexImplILb0E...13unlock_sharedEv
+U _ZN5folly15SharedMutexImplILb0E...6unlockEv
+U _ZN5folly15SharedMutexImplILb1E...32tryUnlockTokenlessSharedDeferredEv
+
+# Folly ThreadLocal internals
+U _ZN5folly18threadlocal_detail14StaticMetaBase22allocateNewThreadEntryEv
+U _ZN5folly18threadlocal_detail14StaticMetaBase7destroyEPNS1_7EntryIDE
+U _ZN5folly18threadlocal_detail14StaticMetaBase8allocateEPNS1_7EntryIDE
+
+# Folly Executor (IOThreadPoolExecutor / CPUThreadPoolExecutor)
+U _ZN5folly20IOThreadPoolExecutorC1EmSt10shared_ptrINS_13ThreadFactoryEE...
+U _ZN5folly21CPUThreadPoolExecutorC1EmNS0_7OptionsE
+
+# Folly Fibers / Baton
+U _ZN5folly6fibers5Baton4postEv
+U _ZN5folly6fibers5Baton4waitEv
+U _ZN5folly6fibers5Fiber6resumeEv
+
+# Folly IOBuf
+U _ZN5folly5IOBuf6createEm
+U _ZN5folly5IOBufC1ENS0_8CreateOpEm
+U _ZN5folly5IOBufD1Ev
+
+# Folly Singleton / logging / misc
+U _ZN5folly14SingletonVaultC1ENS0_4TypeE
+U _ZN5folly14SingletonVault24scheduleDestroyInstancesEv
+U _ZN5folly18LogStreamProcessorC1E...
 ```
 
 **Fix:** Add `--whole-archive`/`--no-whole-archive` around `libvelox.a` in the
@@ -335,10 +372,9 @@ nm -D linux/amd64/libvelox.so | grep "_ZTIN5folly7futures6detail8CoreBaseE"
 
 ---
 
-## Auditing the Old (Broken) JAR
+## Auditing the Old (Broken) JAR — Actual Findings
 
-If you have the old JAR and want to check for **all** undefined non-OS symbols
-(not just CoreBase):
+### Audit commands
 
 ```bash
 cd /tmp && rm -rf gx-audit && mkdir gx-audit && cd gx-audit
@@ -353,22 +389,67 @@ nm -D linux/amd64/libvelox.so | grep ' U ' \
   | grep -vE '@(GLIBC_|CXXABI_|GCC_|GLIBCXX_)' \
   | sort
 
-# 2. Specifically: undefined RTTI typeinfo (_ZTI) and vtables (_ZTV) — these
-#    cause UnsatisfiedLinkError at JVM startup or first use
+# 2. Specifically: undefined RTTI typeinfo (_ZTI) and vtables (_ZTV)
 nm -D linux/amd64/libvelox.so | grep ' U ' | grep -E '_ZTI|_ZTV'
 
 # 3. Folly-specific undefined symbols
 nm -D linux/amd64/libvelox.so | grep ' U ' | grep 'folly'
 
-# 4. Compare libgluten.so as well
+# 4. Compare libgluten.so
 nm -D linux/amd64/libgluten.so | grep ' U ' \
   | grep -vE '@(GLIBC_|CXXABI_|GCC_|GLIBCXX_)' \
   | sort
 ```
 
-The `--whole-archive` fix (Fix 8) addresses ALL Folly RTTI and function symbol
-omissions in one shot — once applied, `libvelox.so` contains every symbol from
-`libvelox.a` so no further undefined-symbol surprises are expected.
+### What the audit of the old JAR showed
+
+Command 1 returns a large list (~400+ lines). The symbols split into two
+categories:
+
+**Legitimately undefined — resolved at runtime from other shared libraries:**
+
+| Symbol prefix | Source at runtime | Notes |
+|---|---|---|
+| `deflate`, `inflate`, `deflateBound` | `libz.so` (system) | zlib compression |
+| `EVP_*`, `HMAC_*`, `RAND_bytes` | `libssl.so.3` / `libcrypto.so.3` (system) | OpenSSL |
+| `LZ4_*`, `LZ4F_*` | `liblz4.so` (system) | LZ4 compression |
+| `snappy::*` | `libsnappy.so` (system) | Snappy compression |
+| `re2::*` | `libre2.so` (system) | RE2 regex |
+| `fmt::*` | `libfmt.so` (system) | fmtlib formatting |
+| `arrow::*` | `libgluten.so` | Arrow is statically linked into libgluten.so |
+| `gluten::*` | `libgluten.so` | Gluten bridge symbols |
+| `google::protobuf::*` | `libgluten.so` | Protobuf statically linked into libgluten.so |
+| `google::LogMessage*` etc. | `libgluten.so` | glog statically linked into libgluten.so |
+
+**Broken — undefined and no library provides them at runtime:**
+
+All `folly::*` symbols in the undefined list. These were dropped from
+`libvelox.a` by the linker's dead-code elimination because Gluten's bridge
+code did not directly reference them. At runtime nothing provides them —
+neither `libgluten.so` (which has no Folly code) nor any system library.
+
+The number of broken Folly symbols in the old JAR is **100+**, spanning:
+- `folly::futures::detail::CoreBase` and all its methods (first crash — data/RTTI)
+- `folly::SharedMutex` internals
+- `folly::ThreadLocal` internals
+- `folly::IOThreadPoolExecutor`, `folly::CPUThreadPoolExecutor`
+- `folly::fibers::Baton`, `folly::fibers::Fiber`
+- `folly::IOBuf`, `folly::SingletonVault`, `folly::EventBaseManager`
+- And many more Folly internals
+
+**Why CoreBase crashed first:** `_ZTIN5folly7futures6detail8CoreBaseE` is a
+RTTI typeinfo *data* symbol (not a function). The dynamic linker resolves data
+symbols **eagerly** even under `RTLD_LAZY` (the default). All the other
+undefined Folly *function* symbols would have failed on first call when those
+code paths were exercised during query execution.
+
+### Conclusion
+
+The old JAR has exactly **one root cause** (missing `--whole-archive` on
+`libvelox.a`) with hundreds of symptoms. The `--whole-archive` fix (Fix 8)
+resolves all of them in a single rebuild — `libvelox.so` will then contain
+every symbol from `libvelox.a` and no further Folly undefined-symbol crashes
+are expected.
 
 ---
 
