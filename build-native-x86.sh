@@ -163,7 +163,8 @@ fi   # end SKIP_SETUP=false
 # ---------------------------------------------------------------------------
 export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-17-openjdk-amd64}"
 export PATH="${JAVA_HOME}/bin:${PATH}"
-export CPU_TARGET="x86_64"
+# Do NOT set CPU_TARGET for x86_64 — valid values are avx/sse/aarch64/arm64/ppc64le.
+# Leaving it unset lets build-helper-functions.sh auto-detect AVX/SSE from /proc/cpuinfo.
 export NUM_THREADS="${NUM_THREADS}"
 
 echo ""
@@ -173,7 +174,7 @@ echo "    CMake   : $(cmake --version | head -1)"
 echo "    Java    : $(java -version 2>&1 | head -1)"
 echo "    Maven   : $(mvn -version 2>&1 | head -1)"
 echo "    gflags  : $(pkg-config --modversion gflags 2>/dev/null || echo 'from /usr/local')"
-echo "    CPU     : ${CPU_TARGET}"
+echo "    CPU     : auto-detect (avx/sse from /proc/cpuinfo)"
 echo "    Threads : ${NUM_THREADS}"
 
 if [[ "${SETUP_ONLY}" == "true" ]]; then
