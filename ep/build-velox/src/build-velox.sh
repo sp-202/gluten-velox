@@ -153,16 +153,17 @@ function compile {
 
   export simdjson_SOURCE=AUTO
   export Arrow_SOURCE=AUTO
+  # BUNDLED is required on both x86_64 and ARM64: Velox's ResolveDependency.cmake
+  # requires the gflags 'shared' component which the apt package (and our static
+  # /usr/local build) do not provide. BUNDLED tells Velox to build gflags itself.
+  # We add -DCMAKE_POSITION_INDEPENDENT_CODE=ON so Velox's internal bundled gflags
+  # is compiled with -fPIC — otherwise Gluten CPP links the non-fPIC archive into
+  # libgluten.so and gets relocation errors on both architectures.
+  export gflags_SOURCE=BUNDLED
+  COMPILE_OPTION="$COMPILE_OPTION -DCMAKE_POSITION_INDEPENDENT_CODE=ON"
   if [ $ARCH == 'x86_64' ]; then
-    # x86_64: use AUTO so Velox picks up our /usr/local gflags (built with -fPIC).
-    # BUNDLED would build a new gflags.a inside _deps/gflags-build/ without -fPIC,
-    # which Gluten CPP's cmake then links into libgluten.so causing relocation errors.
-    export gflags_SOURCE=AUTO
     make $COMPILE_TYPE $NUM_THREADS_OPTS EXTRA_CMAKE_FLAGS="${COMPILE_OPTION}"
   elif [[ "$ARCH" == 'arm64' || "$ARCH" == 'aarch64' || "$ARCH" == "ppc64le" ]]; then
-    # ARM64: BUNDLED is required because the apt gflags package lacks the 'shared'
-    # component that Velox's ResolveDependency.cmake expects on Ubuntu 24.04 ARM64.
-    export gflags_SOURCE=BUNDLED
     CPU_TARGET=$ARCH make $COMPILE_TYPE $NUM_THREADS_OPTS EXTRA_CMAKE_FLAGS="${COMPILE_OPTION}"
   else
     echo "Unsupported arch: $ARCH"
