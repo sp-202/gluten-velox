@@ -153,13 +153,16 @@ function compile {
 
   export simdjson_SOURCE=AUTO
   export Arrow_SOURCE=AUTO
-  # Force Velox to build gflags from source (BUNDLED) rather than picking up
-  # the system /usr/local install, which may be missing the 'shared' component
-  # that Velox's ResolveDependency.cmake requires on ARM64 Ubuntu 24.04.
-  export gflags_SOURCE=BUNDLED
   if [ $ARCH == 'x86_64' ]; then
+    # x86_64: use AUTO so Velox picks up our /usr/local gflags (built with -fPIC).
+    # BUNDLED would build a new gflags.a inside _deps/gflags-build/ without -fPIC,
+    # which Gluten CPP's cmake then links into libgluten.so causing relocation errors.
+    export gflags_SOURCE=AUTO
     make $COMPILE_TYPE $NUM_THREADS_OPTS EXTRA_CMAKE_FLAGS="${COMPILE_OPTION}"
   elif [[ "$ARCH" == 'arm64' || "$ARCH" == 'aarch64' || "$ARCH" == "ppc64le" ]]; then
+    # ARM64: BUNDLED is required because the apt gflags package lacks the 'shared'
+    # component that Velox's ResolveDependency.cmake expects on Ubuntu 24.04 ARM64.
+    export gflags_SOURCE=BUNDLED
     CPU_TARGET=$ARCH make $COMPILE_TYPE $NUM_THREADS_OPTS EXTRA_CMAKE_FLAGS="${COMPILE_OPTION}"
   else
     echo "Unsupported arch: $ARCH"
@@ -195,9 +198,11 @@ function compile {
       echo "INSTALL Folly cmake config files."
       FOLLY_DEPS_DIR="$(pwd)"
       if [ $OS == 'Linux' ]; then
-        sudo cmake --install folly-build/ || true
+        # cmake --install fails on libfollybenchmark.a which is not built by default.
+        # Use a subshell so set -e does not abort the parent script on that error.
+        (sudo cmake --install folly-build/) || true
       elif [ $OS == 'Darwin' ]; then
-        sudo cmake --install folly-build/ || true
+        (sudo cmake --install folly-build/) || true
       fi
       FOLLY_CMAKE_DIR=/usr/local/lib/cmake/folly
       if [ -d "${FOLLY_CMAKE_DIR}" ] && [ ! -f "${FOLLY_CMAKE_DIR}/folly-targets.cmake" ]; then
