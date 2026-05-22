@@ -344,24 +344,26 @@ If you have the old JAR and want to check for **all** undefined non-OS symbols
 cd /tmp && rm -rf gx-audit && mkdir gx-audit && cd gx-audit
 jar -xf /path/to/old-gluten-velox-bundle-spark3.5_2.12-linux_amd64-*.jar linux/amd64/
 
+# NOTE: nm -D prints undefined symbols with a blank address field, so the
+# type 'U' appears as the first whitespace-separated token — use 'grep " U "'
+# not awk '$2 == "U"' (the latter matches nothing for undefined symbols).
+
 # 1. All undefined symbols that are NOT from standard glibc/libstdc++/libgcc
-nm -D linux/amd64/libvelox.so | awk '$2 == "U"' \
+nm -D linux/amd64/libvelox.so | grep ' U ' \
   | grep -vE '@(GLIBC_|CXXABI_|GCC_|GLIBCXX_)' \
-  | sort -k3
+  | sort
 
 # 2. Specifically: undefined RTTI typeinfo (_ZTI) and vtables (_ZTV) — these
 #    cause UnsatisfiedLinkError at JVM startup or first use
-nm -D linux/amd64/libvelox.so | awk '$2 == "U"' \
-  | grep -E '_ZTI|_ZTV'
+nm -D linux/amd64/libvelox.so | grep ' U ' | grep -E '_ZTI|_ZTV'
 
 # 3. Folly-specific undefined symbols
-nm -D linux/amd64/libvelox.so | awk '$2 == "U"' \
-  | grep -i folly
+nm -D linux/amd64/libvelox.so | grep ' U ' | grep 'folly'
 
 # 4. Compare libgluten.so as well
-nm -D linux/amd64/libgluten.so | awk '$2 == "U"' \
+nm -D linux/amd64/libgluten.so | grep ' U ' \
   | grep -vE '@(GLIBC_|CXXABI_|GCC_|GLIBCXX_)' \
-  | sort -k3
+  | sort
 ```
 
 The `--whole-archive` fix (Fix 8) addresses ALL Folly RTTI and function symbol
