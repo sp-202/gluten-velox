@@ -184,6 +184,16 @@ if [[ "${SETUP_ONLY}" == "true" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Wipe stale Folly cmake install
+# If ep/build-velox/build/ was deleted and re-created, the previously
+# installed folly-targets.cmake at /usr/local/lib/cmake/folly/ still points
+# at _deps/folly-src inside the old (now deleted) build tree. Velox then
+# finds this broken system Folly instead of building its own. Remove it now
+# so Velox builds Folly fresh and installs a correct targets file.
+# ---------------------------------------------------------------------------
+sudo rm -rf /usr/local/lib/cmake/folly
+
+# ---------------------------------------------------------------------------
 # Step 5 — Build Velox + Arrow + Gluten CPP + Maven JAR
 # ---------------------------------------------------------------------------
 echo ""

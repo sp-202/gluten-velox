@@ -200,6 +200,11 @@ fi
 # The Velox setup script would try to install system gflags/glog again and
 # undo our -fPIC builds.
 # ---------------------------------------------------------------------------
+# Wipe stale Folly cmake install — if ep/build-velox/build/ was deleted, the
+# previously installed folly-targets.cmake points at _deps/folly-src inside
+# the old (deleted) build tree, causing a cmake error on next run.
+sudo rm -rf /usr/local/lib/cmake/folly
+
 echo ""
 echo ">>> [5/5] Building Velox + Arrow + Gluten CPP + Maven JAR..."
 echo "    Spark version : ${SPARK_VERSION}"

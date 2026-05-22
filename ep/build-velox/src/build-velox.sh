@@ -206,15 +206,18 @@ function compile {
         (sudo cmake --install folly-build/) || true
       fi
       FOLLY_CMAKE_DIR=/usr/local/lib/cmake/folly
-      if [ -d "${FOLLY_CMAKE_DIR}" ] && [ ! -f "${FOLLY_CMAKE_DIR}/folly-targets.cmake" ]; then
-        sudo tee "${FOLLY_CMAKE_DIR}/folly-targets.cmake" > /dev/null << FOLLY_EOF
+      if [ -d "${FOLLY_CMAKE_DIR}" ]; then
+        # Always overwrite so a stale targets file from a previous wiped build
+        # does not point at _deps/folly-src paths that no longer exist.
+        # Only /usr/local/include is stable; the _deps paths live inside the
+        # build tree and are gone after rm -rf ep/build-velox/build/.
+        sudo tee "${FOLLY_CMAKE_DIR}/folly-targets.cmake" > /dev/null << 'FOLLY_EOF'
 # Stub: Folly is compiled into libvelox.a (VELOX_MONO_LIBRARY=ON).
 # folly-no-export.patch removed the real targets file to avoid install conflicts.
 if(NOT TARGET Folly::folly)
   add_library(Folly::folly INTERFACE IMPORTED)
   set_target_properties(Folly::folly PROPERTIES
-    INTERFACE_INCLUDE_DIRECTORIES
-      "/usr/local/include;${FOLLY_DEPS_DIR}/folly-src;${FOLLY_DEPS_DIR}/folly-build")
+    INTERFACE_INCLUDE_DIRECTORIES "/usr/local/include")
 endif()
 if(NOT TARGET Folly::folly_test_util)
   add_library(Folly::folly_test_util INTERFACE IMPORTED)
