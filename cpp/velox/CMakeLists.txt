@@ -296,6 +296,17 @@ target_link_libraries(velox PUBLIC gluten)
 # Requires VELOX_MONO_LIBRARY=ON when building Velox.
 import_library(facebook::velox ${VELOX_BUILD_PATH}/lib/libvelox.a)
 
+# --whole-archive ensures every symbol from the monolithic libvelox.a (including
+# Folly RTTI typeinfo symbols such as folly::futures::detail::CoreBase) is
+# embedded in libvelox.so.  Without it the linker's dead-code elimination drops
+# RTTI .o files that are not directly referenced by Gluten's bridge code,
+# producing an "undefined symbol: _ZTIN5folly..." UnsatisfiedLinkError at JVM
+# startup on x86_64 (the ARM64 code path incidentally pulls them in).
+if(NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
+  target_link_options(velox PRIVATE
+    "-Wl,--whole-archive" "$<TARGET_FILE:facebook::velox>" "-Wl,--no-whole-archive")
+endif()
+
 if(BUILD_TESTS)
   add_duckdb()
 
