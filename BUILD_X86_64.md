@@ -372,6 +372,239 @@ nm -D linux/amd64/libvelox.so | grep "_ZTIN5folly7futures6detail8CoreBaseE"
 
 ---
 
+### Fix 9 — glog and gflags RTTI symbols also missing from `libvelox.so`
+
+**Error (runtime — JVM startup, after Fix 8):**
+```
+java.lang.UnsatisfiedLinkError: .../libvelox.so:
+  undefined symbol: _ZTIN6google12LogMessageERE  (glog)
+  undefined symbol: _ZTIN8gflags26CommandLineFlagInfoE      (gflags)
+```
+
+**Root cause:** Fix 8 added `--whole-archive` for `libvelox.a` (Folly). But
+glog and gflags are also compiled as separate static libraries inside the Velox
+build tree — `_deps/glog-build/libglog.a` and
+`_deps/gflags-build/libgflags_nothreads.a`. Their RTTI typeinfo and function
+symbols are referenced from Velox's code but were not included in `libvelox.a`.
+Without `--whole-archive` on these two archives as well, the linker omits them.
+
+**Fix:** Extend the `--whole-archive` block in `cpp/velox/CMakeLists.txt` to
+also cover `libglog.a` and `libgflags_nothreads.a` from the Velox build tree:
+
+```cmake
+# cpp/velox/CMakeLists.txt
+set(GLOG_STATIC_LIB  "${VELOX_BUILD_PATH}/_deps/glog-build/libglog.a")
+set(GFLAGS_STATIC_LIB "${VELOX_BUILD_PATH}/_deps/gflags-build/libgflags_nothreads.a")
+
+if(EXISTS "${GLOG_STATIC_LIB}")
+  import_library(facebook::glog_static ${GLOG_STATIC_LIB})
+endif()
+if(EXISTS "${GFLAGS_STATIC_LIB}")
+  import_library(facebook::gflags_static ${GFLAGS_STATIC_LIB})
+endif()
+
+if(NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
+  set(_wa_libs "$<TARGET_FILE:facebook::velox>")
+  if(EXISTS "${GLOG_STATIC_LIB}")
+    list(APPEND _wa_libs "$<TARGET_FILE:facebook::glog_static>")
+  endif()
+  if(EXISTS "${GFLAGS_STATIC_LIB}")
+    list(APPEND _wa_libs "$<TARGET_FILE:facebook::gflags_static>")
+  endif()
+  target_link_options(velox PRIVATE
+    "-Wl,--whole-archive" ${_wa_libs} "-Wl,--no-whole-archive")
+endif()
+```
+
+**Files changed:** `cpp/velox/CMakeLists.txt`
+
+---
+
+### Fix 10 — Boost RTTI symbols undefined at runtime (cannot whole-archive)
+
+**Error (runtime — JVM startup, after Fix 9):**
+```
+java.lang.UnsatisfiedLinkError: .../libvelox.so:
+  undefined symbol: _ZTIN5boost15program_options22error_with_option_nameE
+```
+
+**Root cause:** Boost `.a` files on Ubuntu 24.04 x86_64 are **not compiled
+with `-fPIC`**. Attempting to `--whole-archive` them into `libvelox.so` causes
+a build-time error:
+
+```
+relocation R_X86_64_PC32 against symbol in libboost_program_options.a
+  cannot be used in a shared object; recompile with -fPIC
+```
+
+The only option is to link the Boost **shared libraries** (`.so`) as
+`DT_NEEDED` entries in `libvelox.so`, so the dynamic linker loads them
+automatically when `libvelox.so` is loaded.
+
+**Fix:** Add a `foreach` loop in `cpp/velox/CMakeLists.txt` that `find_library`s
+each required system `.so` and adds it via `target_link_libraries`. The
+`find_library` cache variable must be `unset(... CACHE)` each iteration so
+cmake re-searches for the next library name:
+
+```cmake
+set(_dt_needed_libs
+    boost_filesystem boost_program_options boost_context
+    snappy lz4 zstd z lzma bz2 ssl crypto fmt double-conversion event sodium)
+
+foreach(_syslib IN LISTS _dt_needed_libs)
+  find_library(_syslib_path NAMES ${_syslib}
+    PATHS /usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu
+          /usr/lib/aarch64-linux-gnu /lib/aarch64-linux-gnu
+          /usr/local/lib /usr/lib /lib
+    NO_DEFAULT_PATH)
+  if(_syslib_path)
+    message(STATUS "Adding DT_NEEDED: ${_syslib_path}")
+    target_link_libraries(velox PUBLIC ${_syslib_path})
+  endif()
+  unset(_syslib_path CACHE)   # MUST unset or cmake returns the cached first result for all iterations
+endforeach()
+```
+
+**Note on lz4/zstd:** Arrow bundles its own lz4 and zstd
+(`ARROW_DEPENDENCY_SOURCE=BUNDLED`) — those symbols are already in
+`libgluten.so` / `libvelox.so`. The `lz4` and `zstd` entries in the list above
+are harmless; they add `DT_NEEDED` entries for system lz4/zstd but the
+Arrow-bundled symbols take precedence at runtime.
+
+**Files changed:** `cpp/velox/CMakeLists.txt`
+
+---
+
+### Fix 11 — OpenSSL / snappy / lzma undefined symbols
+
+**Error (runtime — after adding Boost DT_NEEDED):**
+```
+java.lang.UnsatisfiedLinkError: .../libvelox.so:
+  undefined symbol: X509_NAME_free      (OpenSSL)
+  undefined symbol: _ZTIN6snappy6SourceE (snappy)
+  undefined symbol: lzma_easy_encoder    (lzma)
+```
+
+**Root cause:** The initial DT_NEEDED list was incomplete — `ssl`, `crypto`,
+`snappy`, and `lzma` were not included. The `find_library` search paths also
+did not cover all Ubuntu 24.04 multiarch paths.
+
+**Fix:** Add `snappy`, `ssl`, `crypto`, `lzma` to the `_dt_needed_libs` list
+in Fix 10, and broaden the `PATHS` to include both `/usr/lib/x86_64-linux-gnu`
+and `/lib/x86_64-linux-gnu` (and the arm64 equivalents). Final list:
+
+```
+boost_filesystem boost_program_options boost_context snappy
+lz4 zstd z lzma bz2 ssl crypto fmt double-conversion event sodium
+```
+
+**Files changed:** `cpp/velox/CMakeLists.txt`
+
+---
+
+### Fix 12 — Geo function registration crash when `VELOX_ENABLE_GEO=OFF`
+
+**Error (runtime — JVM startup):**
+```
+java.lang.UnsatisfiedLinkError: .../libvelox.so:
+  undefined symbol: _ZN8facebook5velox9functions25registerGeometryFunctionsERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE
+  undefined symbol: _ZN8facebook5velox9functions34registerSphericalGeographyFunctionsEv
+  undefined symbol: _ZN8facebook5velox9functions14registerS2FunctionsERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE
+```
+
+**Root cause:** `cpp/velox/operators/functions/RegistrationAllFunctions.cc`
+called `registerGeometryFunctions`, `registerSphericalGeographyFunctions`, and
+`registerS2Functions` unconditionally. When Velox is built with
+`VELOX_ENABLE_GEO=OFF` (the default on Ubuntu 24.04 — see Fix 6), those
+functions are not compiled into `libvelox.a`, so `libvelox.so` has them as
+undefined symbols.
+
+**Fix:** Guard all geo function calls with `#ifdef VELOX_ENABLE_GEO` in
+`RegistrationAllFunctions.cc`, and emit `target_compile_definitions(velox
+PRIVATE VELOX_ENABLE_GEO)` from CMake only when GEOS is actually available:
+
+```cpp
+// RegistrationAllFunctions.cc
+#ifdef VELOX_ENABLE_GEO
+namespace facebook::velox::functions {
+extern void registerGeometryFunctions(const std::string& prefix);
+extern void registerSphericalGeographyFunctions();
+extern void registerS2Functions(const std::string& prefix);
+} // namespace facebook::velox::functions
+#endif
+
+// In registerAllFunctions():
+#ifdef VELOX_ENABLE_GEO
+  velox::functions::registerGeometryFunctions("");
+  velox::functions::registerSphericalGeographyFunctions();
+  velox::functions::prestosql::registerBingTileFunctions("");
+  velox::functions::registerS2Functions("");
+#endif
+```
+
+```cmake
+# cpp/velox/CMakeLists.txt — GEOS section
+find_package(geos QUIET)
+if(geos_FOUND AND TARGET GEOS::geos)
+  target_link_libraries(velox PUBLIC GEOS::geos)
+  target_compile_definitions(velox PRIVATE VELOX_ENABLE_GEO)
+elseif(EXISTS "${VELOX_BUILD_PATH}/lib/libgeos.a")
+  import_library(external::geos "${VELOX_BUILD_PATH}/lib/libgeos.a")
+  target_link_libraries(velox PUBLIC external::geos)
+  target_compile_definitions(velox PRIVATE VELOX_ENABLE_GEO)
+else()
+  message(STATUS "GEOS not found — geo functions excluded (VELOX_ENABLE_GEO=OFF)")
+endif()
+```
+
+**Files changed:** `cpp/velox/operators/functions/RegistrationAllFunctions.cc`,
+`cpp/velox/CMakeLists.txt`
+
+---
+
+## Runtime Dependencies (Fresh Ubuntu 24.04 Node)
+
+Every node that runs the Gluten JAR (driver + all workers) must have these
+system packages installed. The JAR bundles only `libarrow_cdata_jni.so`,
+`libarrow_dataset_jni.so`, `libgluten.so`, and `libvelox.so` — all other
+libraries are resolved at runtime from the system via ELF `DT_NEEDED` entries
+embedded in `libvelox.so`.
+
+```bash
+sudo apt-get update && sudo apt-get install -y \
+  openjdk-17-jdk \
+  libboost-filesystem1.83.0 \
+  libboost-program-options1.83.0 \
+  libboost-context1.83.0 \
+  libsnappy1v5 \
+  liblz4-1 \
+  libzstd1 \
+  libbz2-1.0 \
+  libssl3t64 \
+  libfmt9 \
+  libdouble-conversion3 \
+  libevent-2.1-7t64 \
+  libsodium23 \
+  liblzma5 \
+  libre2-10
+```
+
+**Ubuntu 24.04 package name changes vs older releases:**
+
+| Old name (Ubuntu 22.04 and earlier) | Ubuntu 24.04 name |
+|-------------------------------------|-------------------|
+| `libsnappy1` | `libsnappy1v5` |
+| `libssl3` | `libssl3t64` |
+| `libevent-2.1-7` | `libevent-2.1-7t64` |
+| `libre2-9` | `libre2-10` |
+
+Note: `libre2-10` is easy to miss — it is not pulled in by any other Gluten
+dependency but is required by Velox's regex functions. Missing it causes a
+`libvelox.so: cannot open shared object file` error at JVM startup on a fresh
+node.
+
+---
+
 ## Auditing the Old (Broken) JAR — Actual Findings
 
 ### Audit commands
