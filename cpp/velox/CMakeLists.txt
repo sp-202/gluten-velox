@@ -299,14 +299,21 @@ import_library(facebook::velox ${VELOX_BUILD_PATH}/lib/libvelox.a)
 # VELOX_MONO_LIBRARY=ON links Folly and glog into libvelox.a, but abstract-class
 # typeinfo symbols (e.g. _ZTIN5folly8ExecutorE, _ZTIN6google7LogSinkE) live in
 # libfolly.a / libglog.a and are NOT merged into libvelox.a by the linker unless
-# explicitly requested. Link them under --whole-archive so their RTTI typeinfo
-# symbols are defined in libvelox.so and resolve at JVM load time.
+# explicitly requested. Boost filesystem and program_options also have undefined
+# RTTI symbols (_ZTIN5boost*) that the JVM cannot resolve at load time because
+# System.load() uses RTLD_LOCAL (not RTLD_GLOBAL). Link all of these under
+# --whole-archive so their symbols are defined inside libvelox.so itself.
 set(FOLLY_STATIC_LIB "${VELOX_BUILD_PATH}/_deps/folly-build/libfolly.a")
 set(GLOG_STATIC_LIB "${VELOX_BUILD_PATH}/_deps/glog-build/libglog.a")
 # gflags_nothreads is Velox's bundled gflags (gflags_SOURCE=BUNDLED).
-# Its symbols (FLAGS_*, FlagRegisterer) are referenced by libvelox.a and libglog.a
-# but not exported from libvelox.so unless forced with --whole-archive.
 set(GFLAGS_STATIC_LIB "${VELOX_BUILD_PATH}/_deps/gflags-build/libgflags_nothreads.a")
+# Boost static libs from system — present on Ubuntu 24.04 via libboost-all-dev.
+find_library(BOOST_FILESYSTEM_STATIC NAMES libboost_filesystem.a
+  PATHS ${SYSTEM_LIB_MULTIARCH_PATH} ${SYSTEM_LIB_PATH} ${SYSTEM_LOCAL_LIB_PATH}
+  NO_DEFAULT_PATH)
+find_library(BOOST_PROGRAM_OPTIONS_STATIC NAMES libboost_program_options.a
+  PATHS ${SYSTEM_LIB_MULTIARCH_PATH} ${SYSTEM_LIB_PATH} ${SYSTEM_LOCAL_LIB_PATH}
+  NO_DEFAULT_PATH)
 if(EXISTS "${FOLLY_STATIC_LIB}")
   import_library(facebook::folly_static ${FOLLY_STATIC_LIB})
 endif()
@@ -315,6 +322,12 @@ if(EXISTS "${GLOG_STATIC_LIB}")
 endif()
 if(EXISTS "${GFLAGS_STATIC_LIB}")
   import_library(facebook::gflags_static ${GFLAGS_STATIC_LIB})
+endif()
+if(BOOST_FILESYSTEM_STATIC)
+  import_library(boost::filesystem_static ${BOOST_FILESYSTEM_STATIC})
+endif()
+if(BOOST_PROGRAM_OPTIONS_STATIC)
+  import_library(boost::program_options_static ${BOOST_PROGRAM_OPTIONS_STATIC})
 endif()
 
 if(NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
@@ -327,6 +340,12 @@ if(NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
   endif()
   if(EXISTS "${GFLAGS_STATIC_LIB}")
     list(APPEND _wa_libs "$<TARGET_FILE:facebook::gflags_static>")
+  endif()
+  if(BOOST_FILESYSTEM_STATIC)
+    list(APPEND _wa_libs "$<TARGET_FILE:boost::filesystem_static>")
+  endif()
+  if(BOOST_PROGRAM_OPTIONS_STATIC)
+    list(APPEND _wa_libs "$<TARGET_FILE:boost::program_options_static>")
   endif()
   target_link_options(velox PRIVATE
     "-Wl,--whole-archive" ${_wa_libs} "-Wl,--no-whole-archive")
