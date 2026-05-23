@@ -76,6 +76,11 @@ public class LowCopyNettyJniByteInputStream implements JniByteInputStream {
   }
 
   public static boolean isSupported(InputStream in) {
+    // directBuffer() requires sun.misc.Unsafe; fall back to OnHeapJniByteInputStream on Java 17+
+    // when Unsafe is not accessible.
+    if (!PlatformDependent.hasUnsafe()) {
+      return false;
+    }
     if (!(in instanceof ByteBufInputStream)) {
       return false;
     }
