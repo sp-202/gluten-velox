@@ -280,6 +280,182 @@ then rejects it when building `libgluten.so`.
 
 ---
 
+### Fix 9 — `SharedLibraryLoaderUbuntu2404` missing — JVM cannot find loader
+
+**Error (runtime — JVM startup on fresh Ubuntu 24.04 node):**
+```
+org.apache.gluten.exception.GlutenException: Cannot find SharedLibraryLoader
+for Ubuntu 24.04.4 LTS (Noble Numbat), please check whether your custom
+SharedLibraryLoader is implemented and loadable.
+```
+
+**Root cause:** The old ARM64 JAR in S3 was built before
+`SharedLibraryLoaderUbuntu2404` was added to the source. The SPI mechanism
+iterates all registered loaders and calls `accepts(osName, osVersion)` — none
+of the old loaders matched `"Ubuntu 24.04"`, so Gluten aborted.
+
+**Fix:** Add `SharedLibraryLoaderUbuntu2404.scala` and register it in
+`META-INF/services/org.apache.gluten.spi.SharedLibraryLoader`. The new loader
+matches `osName.contains("Ubuntu") && osVersion.startsWith("24.04")` and only
+loads the 4 `.so` files actually present in the JAR — system libs are resolved
+automatically at runtime via ELF `DT_NEEDED` entries in `libvelox.so`.
+
+**Files changed:** `backends-velox/src/main/scala/org/apache/gluten/spi/SharedLibraryLoaderUbuntu2404.scala`,
+`backends-velox/src/main/resources/META-INF/services/org.apache.gluten.spi.SharedLibraryLoader`
+
+---
+
+### Fix 10 — Wrong Arrow JNI path inside JAR (`aarch64/` vs `aarch_64/`)
+
+**Error (runtime — JVM startup):**
+```
+org.apache.gluten.exception.GlutenException:
+  java.io.FileNotFoundException: aarch64/libarrow_cdata_jni.so
+```
+
+**Root cause:** Arrow's Maven build places JNI libs at `aarch_64/` (with an
+underscore between `aarch` and `64`) inside the JAR on ARM64. The initial
+`SharedLibraryLoaderUbuntu2404` loader used `aarch64/` (no underscore), which
+does not exist in the JAR.
+
+Confirmed from `jar -tf` output:
+```
+aarch_64/libarrow_cdata_jni.so
+aarch_64/libarrow_dataset_jni.so
+linux/aarch64/libgluten.so
+linux/aarch64/libvelox.so
+```
+
+**Fix:** Use `aarch_64/` for Arrow JNI prefix on ARM64. The loader detects
+`os.arch` at runtime and selects the correct prefix pair:
+
+```scala
+val arch = System.getProperty("os.arch", "")
+val (arrowPrefix, glutenPrefix) = if (arch == "aarch64") {
+  ("aarch_64", "linux/aarch64")   // ARM64: note underscore in aarch_64
+} else {
+  ("x86_64", "linux/amd64")       // x86_64
+}
+```
+
+**Files changed:** `backends-velox/src/main/scala/org/apache/gluten/spi/SharedLibraryLoaderUbuntu2404.scala`
+
+---
+
+## Runtime Dependencies (Fresh Ubuntu 24.04 ARM64 Node)
+
+Every node that runs the Gluten JAR (driver + all workers) must have these
+system packages installed. The JAR bundles only `libarrow_cdata_jni.so`,
+`libarrow_dataset_jni.so`, `libgluten.so`, and `libvelox.so` — all other
+libraries are resolved at runtime from the system via ELF `DT_NEEDED` entries
+embedded in `libvelox.so`.
+
+```bash
+sudo apt-get update && sudo apt-get install -y \
+  openjdk-17-jdk \
+  libboost-filesystem1.83.0 \
+  libboost-program-options1.83.0 \
+  libboost-context1.83.0 \
+  libsnappy1v5 \
+  liblz4-1 \
+  libzstd1 \
+  libbz2-1.0 \
+  libssl3t64 \
+  libfmt9 \
+  libdouble-conversion3 \
+  libevent-2.1-7t64 \
+  libsodium23 \
+  liblzma5 \
+  libre2-10
+```
+
+**Ubuntu 24.04 package name changes vs older releases:**
+
+| Old name (Ubuntu 22.04 and earlier) | Ubuntu 24.04 name |
+|-------------------------------------|-------------------|
+| `libsnappy1` | `libsnappy1v5` |
+| `libssl3` | `libssl3t64` |
+| `libevent-2.1-7` | `libevent-2.1-7t64` |
+| `libre2-9` | `libre2-10` |
+
+---
+
+## Fresh EC2 Deployment (from S3)
+
+To deploy on a fresh ARM64 Ubuntu 24.04 node without building from source:
+
+**Step 1 — Install runtime dependencies (see above)**
+
+**Step 2 — Install Spark 3.5:**
+```bash
+wget https://archive.apache.org/dist/spark/spark-3.5.3/spark-3.5.3-bin-hadoop3.tgz
+tar -xzf spark-3.5.3-bin-hadoop3.tgz
+export SPARK_HOME=$HOME/spark-3.5.3-bin-hadoop3
+export PATH=$SPARK_HOME/bin:$PATH
+```
+
+**Step 3 — Pull the JAR from S3:**
+```bash
+aws s3 cp s3://gluten-jars-2026/gluten/arm64/gluten-velox-bundle-spark3.5_2.12-linux_aarch64-1.7.0-SNAPSHOT.jar \
+  $SPARK_HOME/jars/
+```
+
+**Step 4 — Launch and verify:**
+```bash
+$SPARK_HOME/bin/spark-shell \
+  --master local[4] \
+  --driver-memory 8g \
+  --conf spark.plugins=org.apache.gluten.GlutenPlugin \
+  --conf spark.gluten.loadLibFromJar=true \
+  --conf spark.memory.offHeap.enabled=true \
+  --conf spark.memory.offHeap.size=24g \
+  --conf spark.sql.adaptive.enabled=false \
+  --conf spark.shuffle.manager=org.apache.spark.shuffle.sort.ColumnarShuffleManager \
+  --jars $SPARK_HOME/jars/gluten-velox-bundle-spark3.5_2.12-linux_aarch64-1.7.0-SNAPSHOT.jar
+```
+
+Inside spark-shell, confirm Velox is active:
+```scala
+spark.sql("SELECT sum(id), count(*) FROM range(10000000)").explain()
+```
+
+Look for `VeloxColumnarToRow` and `HashAggregateTransformer` in the plan.
+
+---
+
+## Uploading Built JARs to S3
+
+After a successful build, extract the `.so` files and upload everything:
+
+```bash
+# Extract .so files from the JAR
+cd ~
+mkdir -p so-files
+cd so-files
+jar -xf ~/gluten-velox/output/gluten-velox-bundle-spark3.5_2.12-linux_aarch64-1.7.0-SNAPSHOT.jar \
+  linux/aarch64/libgluten.so \
+  linux/aarch64/libvelox.so \
+  aarch_64/libarrow_cdata_jni.so \
+  aarch_64/libarrow_dataset_jni.so
+
+# Upload JARs
+aws s3 cp ~/gluten-velox/output/gluten-velox-bundle-spark3.5_2.12-linux_aarch64-1.7.0-SNAPSHOT.jar s3://gluten-jars-2026/gluten/arm64/
+aws s3 cp ~/gluten-velox/output/gluten-package-1.7.0-SNAPSHOT.jar s3://gluten-jars-2026/gluten/arm64/
+aws s3 cp ~/gluten-velox/output/gluten-package-1.7.0-SNAPSHOT-3.5.jar s3://gluten-jars-2026/gluten/arm64/
+aws s3 cp ~/gluten-velox/output/original-gluten-package-1.7.0-SNAPSHOT.jar s3://gluten-jars-2026/gluten/arm64/
+
+# Upload .so files
+aws s3 cp ~/so-files/linux/aarch64/libgluten.so s3://gluten-jars-2026/gluten/arm64/so/
+aws s3 cp ~/so-files/linux/aarch64/libvelox.so s3://gluten-jars-2026/gluten/arm64/so/
+aws s3 cp ~/so-files/aarch_64/libarrow_cdata_jni.so s3://gluten-jars-2026/gluten/arm64/so/
+aws s3 cp ~/so-files/aarch_64/libarrow_dataset_jni.so s3://gluten-jars-2026/gluten/arm64/so/
+```
+
+Note: `jar -xf` must be run from a writable directory (not from inside `output/`
+which is owned by root). Run from `$HOME` instead.
+
+---
+
 ## Incremental Rebuilds
 
 If the build fails partway through, use `--skip-setup` to avoid re-building
