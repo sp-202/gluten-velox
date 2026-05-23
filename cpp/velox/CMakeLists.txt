@@ -304,7 +304,12 @@ import_library(facebook::velox ${VELOX_BUILD_PATH}/lib/libvelox.a)
 # startup on x86_64 (the ARM64 code path incidentally pulls them in).
 if(NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
   target_link_options(velox PRIVATE
-    "-Wl,--whole-archive" "$<TARGET_FILE:facebook::velox>" "-Wl,--no-whole-archive")
+    "-Wl,--whole-archive" "$<TARGET_FILE:facebook::velox>" "-Wl,--no-whole-archive"
+    # Export all symbols including weak RTTI typeinfo (e.g. folly::Executor).
+    # Without this, abstract-class typeinfo defined as weak symbols in libvelox.a
+    # are dropped by the linker and remain undefined in libvelox.so, causing
+    # UnsatisfiedLinkError at JVM startup on x86_64.
+    "-Wl,--export-dynamic")
 endif()
 
 if(BUILD_TESTS)
