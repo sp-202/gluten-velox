@@ -25,26 +25,13 @@ class SharedLibraryLoaderUbuntu2404 extends SharedLibraryLoader {
   }
 
   override def loadLib(loader: JniLibLoader): Unit = {
-    loader.loadAndCreateLink("libboost_context.so.1.83.0", "libboost_context.so")
-    loader.loadAndCreateLink("libicudata.so.74", "libicudata.so")
-    loader.loadAndCreateLink("libicuuc.so.74", "libicuuc.so")
-    loader.loadAndCreateLink("libicui18n.so.74", "libicui18n.so")
-    loader.loadAndCreateLink("libboost_regex.so.1.83.0", "libboost_regex.so")
-    loader.loadAndCreateLink("libnghttp2.so.14", "libnghttp2.so")
-    loader.loadAndCreateLink("librtmp.so.1", "librtmp.so")
-    loader.loadAndCreateLink("libssh.so.4", "libssh.so")
-    loader.loadAndCreateLink("libsasl2.so.2", "libsasl2.so")
-    loader.loadAndCreateLink("liblber-2.5.so.0", "liblber-2.5.so")
-    loader.loadAndCreateLink("libldap-2.5.so.0", "libldap-2.5.so")
-    loader.loadAndCreateLink("libcurl.so.4", "libcurl.so")
-    loader.loadAndCreateLink("libdouble-conversion.so.3", "libdouble-conversion.so")
-    loader.loadAndCreateLink("libevent-2.1.so.7", "libevent-2.1.so")
-    loader.loadAndCreateLink("libgflags.so.2.2", "libgflags.so")
-    loader.loadAndCreateLink("libunwind.so.8", "libunwind.so")
-    loader.loadAndCreateLink("libglog.so.3", "libglog.so")
-    loader.loadAndCreateLink("libre2.so.10", "libre2.so")
-    loader.loadAndCreateLink("libsnappy.so.1", "libsnappy.so")
-    loader.loadAndCreateLink("libthrift-0.16.0.so", "libthrift.so")
+    // Ubuntu 24.04 build links against system libs — they are NOT bundled in the JAR.
+    // The dynamic linker resolves them automatically from the system at load time.
+    // Only load the files actually present in the JAR: arrow JNI libs, then gluten/velox.
+    loader.loadAndCreateLink("x86_64/libarrow_cdata_jni.so", "libarrow_cdata_jni.so")
+    loader.loadAndCreateLink("x86_64/libarrow_dataset_jni.so", "libarrow_dataset_jni.so")
+    loader.loadAndCreateLink("linux/amd64/libgluten.so", "libgluten.so")
+    loader.loadAndCreateLink("linux/amd64/libvelox.so", "libvelox.so")
   }
 
 }
