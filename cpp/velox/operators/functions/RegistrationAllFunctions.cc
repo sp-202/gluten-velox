@@ -37,12 +37,14 @@
 using namespace facebook;
 
 // Forward declarations for Velox geospatial registration functions.
-// Requires Velox built with VELOX_ENABLE_GEO=ON (set in build-velox.sh).
+// Only available when Velox is built with VELOX_ENABLE_GEO=ON.
+#ifdef VELOX_ENABLE_GEO
 namespace facebook::velox::functions {
 extern void registerGeometryFunctions(const std::string& prefix);
 extern void registerSphericalGeographyFunctions();
 extern void registerS2Functions(const std::string& prefix);
 } // namespace facebook::velox::functions
+#endif // VELOX_ENABLE_GEO
 
 namespace facebook::velox::functions {
 void registerPrestoVectorFunctions() {
@@ -103,12 +105,14 @@ void registerAllFunctions() {
 
   velox::functions::iceberg::registerFunctions();
 
+#ifdef VELOX_ENABLE_GEO
   // Geospatial: ST_* geometry, SphericalGeography, BingTile, S2 cells.
-  // Velox must be built with VELOX_ENABLE_GEO=ON (see build-velox.sh).
+  // Only available when Velox is built with VELOX_ENABLE_GEO=ON.
   velox::functions::registerGeometryFunctions("");
   velox::functions::registerSphericalGeographyFunctions();
   velox::functions::prestosql::registerBingTileFunctions("");
   velox::functions::registerS2Functions("");
+#endif // VELOX_ENABLE_GEO
 }
 
 } // namespace gluten
