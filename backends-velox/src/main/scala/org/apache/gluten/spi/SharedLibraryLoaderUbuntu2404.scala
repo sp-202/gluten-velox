@@ -33,7 +33,7 @@ class SharedLibraryLoaderUbuntu2404 extends SharedLibraryLoader {
     //   aarch64 → arrow: aarch64/,  gluten/velox: linux/aarch64/
     val arch = System.getProperty("os.arch", "")
     val (arrowPrefix, glutenPrefix) = if (arch == "aarch64") {
-      ("aarch64", "linux/aarch64")
+      ("aarch_64", "linux/aarch64")
     } else {
       ("x86_64", "linux/amd64")
     }
