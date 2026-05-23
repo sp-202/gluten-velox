@@ -340,7 +340,8 @@ endif()
 # DT_NEEDED, so the dynamic linker does not load them before resolving symbols
 # at JVM startup (System.load uses RTLD_LOCAL; pre-loading does not help).
 # Explicitly linking them here adds the DT_NEEDED entries.
-foreach(_syslib IN ITEMS
+# Search both multiarch and /lib paths since Ubuntu 24.04 has libs in both.
+set(_dt_needed_libs
     boost_filesystem
     boost_program_options
     boost_context
@@ -348,13 +349,23 @@ foreach(_syslib IN ITEMS
     lz4
     zstd
     z
+    lzma
     bz2
+    ssl
+    crypto
     fmt
     double-conversion
     event
     sodium)
+foreach(_syslib IN LISTS _dt_needed_libs)
   find_library(_syslib_path NAMES ${_syslib}
-    PATHS ${SYSTEM_LIB_MULTIARCH_PATH} ${SYSTEM_LIB_PATH} ${SYSTEM_LOCAL_LIB_PATH}
+    PATHS
+      ${SYSTEM_LIB_MULTIARCH_PATH}
+      ${SYSTEM_LIB_PATH}
+      ${SYSTEM_LOCAL_LIB_PATH}
+      "/lib/x86_64-linux-gnu"
+      "/lib/aarch64-linux-gnu"
+      "/lib"
     NO_DEFAULT_PATH)
   if(_syslib_path)
     message(STATUS "Adding DT_NEEDED: ${_syslib_path}")
