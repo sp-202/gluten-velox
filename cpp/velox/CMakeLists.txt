@@ -335,25 +335,33 @@ if(NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
     "-Wl,--whole-archive" ${_wa_libs} "-Wl,--no-whole-archive")
 endif()
 
-# Link boost shared libs so they appear as DT_NEEDED in libvelox.so.
-# The system .a files lack -fPIC and cannot be whole-archived into a .so.
-# Linking the .so ensures the dynamic linker loads boost before resolving
-# libvelox.so symbols at JVM startup (System.load uses RTLD_LOCAL so we
-# cannot rely on pre-loading; DT_NEEDED is the correct mechanism).
-find_library(BOOST_FILESYSTEM_SO NAMES boost_filesystem
-  PATHS ${SYSTEM_LIB_MULTIARCH_PATH} ${SYSTEM_LIB_PATH} ${SYSTEM_LOCAL_LIB_PATH}
-  NO_DEFAULT_PATH)
-find_library(BOOST_PROGRAM_OPTIONS_SO NAMES boost_program_options
-  PATHS ${SYSTEM_LIB_MULTIARCH_PATH} ${SYSTEM_LIB_PATH} ${SYSTEM_LOCAL_LIB_PATH}
-  NO_DEFAULT_PATH)
-if(BOOST_FILESYSTEM_SO)
-  message(STATUS "Linking boost_filesystem shared: ${BOOST_FILESYSTEM_SO}")
-  target_link_libraries(velox PUBLIC ${BOOST_FILESYSTEM_SO})
-endif()
-if(BOOST_PROGRAM_OPTIONS_SO)
-  message(STATUS "Linking boost_program_options shared: ${BOOST_PROGRAM_OPTIONS_SO}")
-  target_link_libraries(velox PUBLIC ${BOOST_PROGRAM_OPTIONS_SO})
-endif()
+# Link system shared libs so they appear as DT_NEEDED in libvelox.so.
+# libvelox.so references symbols from these libs but does not record them as
+# DT_NEEDED, so the dynamic linker does not load them before resolving symbols
+# at JVM startup (System.load uses RTLD_LOCAL; pre-loading does not help).
+# Explicitly linking them here adds the DT_NEEDED entries.
+foreach(_syslib IN ITEMS
+    boost_filesystem
+    boost_program_options
+    boost_context
+    snappy
+    lz4
+    zstd
+    z
+    bz2
+    fmt
+    double-conversion
+    event
+    sodium)
+  find_library(_syslib_path NAMES ${_syslib}
+    PATHS ${SYSTEM_LIB_MULTIARCH_PATH} ${SYSTEM_LIB_PATH} ${SYSTEM_LOCAL_LIB_PATH}
+    NO_DEFAULT_PATH)
+  if(_syslib_path)
+    message(STATUS "Adding DT_NEEDED: ${_syslib_path}")
+    target_link_libraries(velox PUBLIC ${_syslib_path})
+  endif()
+  unset(_syslib_path CACHE)
+endforeach()
 
 if(BUILD_TESTS)
   add_duckdb()
