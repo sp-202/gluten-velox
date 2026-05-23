@@ -296,20 +296,28 @@ target_link_libraries(velox PUBLIC gluten)
 # Requires VELOX_MONO_LIBRARY=ON when building Velox.
 import_library(facebook::velox ${VELOX_BUILD_PATH}/lib/libvelox.a)
 
-# --whole-archive ensures every symbol from the monolithic libvelox.a (including
-# Folly RTTI typeinfo symbols such as folly::futures::detail::CoreBase) is
-# embedded in libvelox.so.  Without it the linker's dead-code elimination drops
-# RTTI .o files that are not directly referenced by Gluten's bridge code,
-# producing an "undefined symbol: _ZTIN5folly..." UnsatisfiedLinkError at JVM
-# startup on x86_64 (the ARM64 code path incidentally pulls them in).
+# Folly is built as a separate static lib inside the Velox build tree.
+# VELOX_MONO_LIBRARY=ON links Folly into libvelox.a but folly::Executor
+# and other abstract-class typeinfo symbols (e.g. _ZTIN5folly8ExecutorE)
+# live in libfolly.a and are NOT merged into libvelox.a.
+# We must link libfolly.a into libvelox.so with --whole-archive so its
+# RTTI typeinfo symbols are defined in the .so and resolve at JVM load time.
+set(FOLLY_STATIC_LIB "${VELOX_BUILD_PATH}/_deps/folly-build/libfolly.a")
+if(EXISTS "${FOLLY_STATIC_LIB}")
+  import_library(facebook::folly_static ${FOLLY_STATIC_LIB})
+endif()
+
 if(NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
-  target_link_options(velox PRIVATE
-    "-Wl,--whole-archive" "$<TARGET_FILE:facebook::velox>" "-Wl,--no-whole-archive"
-    # Export all symbols including weak RTTI typeinfo (e.g. folly::Executor).
-    # Without this, abstract-class typeinfo defined as weak symbols in libvelox.a
-    # are dropped by the linker and remain undefined in libvelox.so, causing
-    # UnsatisfiedLinkError at JVM startup on x86_64.
-    "-Wl,--export-dynamic")
+  if(EXISTS "${FOLLY_STATIC_LIB}")
+    target_link_options(velox PRIVATE
+      "-Wl,--whole-archive"
+      "$<TARGET_FILE:facebook::velox>"
+      "$<TARGET_FILE:facebook::folly_static>"
+      "-Wl,--no-whole-archive")
+  else()
+    target_link_options(velox PRIVATE
+      "-Wl,--whole-archive" "$<TARGET_FILE:facebook::velox>" "-Wl,--no-whole-archive")
+  endif()
 endif()
 
 if(BUILD_TESTS)
