@@ -296,28 +296,40 @@ target_link_libraries(velox PUBLIC gluten)
 # Requires VELOX_MONO_LIBRARY=ON when building Velox.
 import_library(facebook::velox ${VELOX_BUILD_PATH}/lib/libvelox.a)
 
-# Folly is built as a separate static lib inside the Velox build tree.
-# VELOX_MONO_LIBRARY=ON links Folly into libvelox.a but folly::Executor
-# and other abstract-class typeinfo symbols (e.g. _ZTIN5folly8ExecutorE)
-# live in libfolly.a and are NOT merged into libvelox.a.
-# We must link libfolly.a into libvelox.so with --whole-archive so its
-# RTTI typeinfo symbols are defined in the .so and resolve at JVM load time.
+# VELOX_MONO_LIBRARY=ON links Folly and glog into libvelox.a, but abstract-class
+# typeinfo symbols (e.g. _ZTIN5folly8ExecutorE, _ZTIN6google7LogSinkE) live in
+# libfolly.a / libglog.a and are NOT merged into libvelox.a by the linker unless
+# explicitly requested. Link them under --whole-archive so their RTTI typeinfo
+# symbols are defined in libvelox.so and resolve at JVM load time.
 set(FOLLY_STATIC_LIB "${VELOX_BUILD_PATH}/_deps/folly-build/libfolly.a")
+set(GLOG_STATIC_LIB "${VELOX_BUILD_PATH}/_deps/glog-build/libglog.a")
+# gflags_nothreads is Velox's bundled gflags (gflags_SOURCE=BUNDLED).
+# Its symbols (FLAGS_*, FlagRegisterer) are referenced by libvelox.a and libglog.a
+# but not exported from libvelox.so unless forced with --whole-archive.
+set(GFLAGS_STATIC_LIB "${VELOX_BUILD_PATH}/_deps/gflags-build/libgflags_nothreads.a")
 if(EXISTS "${FOLLY_STATIC_LIB}")
   import_library(facebook::folly_static ${FOLLY_STATIC_LIB})
 endif()
+if(EXISTS "${GLOG_STATIC_LIB}")
+  import_library(facebook::glog_static ${GLOG_STATIC_LIB})
+endif()
+if(EXISTS "${GFLAGS_STATIC_LIB}")
+  import_library(facebook::gflags_static ${GFLAGS_STATIC_LIB})
+endif()
 
 if(NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
+  set(_wa_libs "$<TARGET_FILE:facebook::velox>")
   if(EXISTS "${FOLLY_STATIC_LIB}")
-    target_link_options(velox PRIVATE
-      "-Wl,--whole-archive"
-      "$<TARGET_FILE:facebook::velox>"
-      "$<TARGET_FILE:facebook::folly_static>"
-      "-Wl,--no-whole-archive")
-  else()
-    target_link_options(velox PRIVATE
-      "-Wl,--whole-archive" "$<TARGET_FILE:facebook::velox>" "-Wl,--no-whole-archive")
+    list(APPEND _wa_libs "$<TARGET_FILE:facebook::folly_static>")
   endif()
+  if(EXISTS "${GLOG_STATIC_LIB}")
+    list(APPEND _wa_libs "$<TARGET_FILE:facebook::glog_static>")
+  endif()
+  if(EXISTS "${GFLAGS_STATIC_LIB}")
+    list(APPEND _wa_libs "$<TARGET_FILE:facebook::gflags_static>")
+  endif()
+  target_link_options(velox PRIVATE
+    "-Wl,--whole-archive" ${_wa_libs} "-Wl,--no-whole-archive")
 endif()
 
 if(BUILD_TESTS)
