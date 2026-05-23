@@ -24,3 +24,4 @@ org.apache.gluten.spi.SharedLibraryLoaderMacOS
 org.apache.gluten.spi.SharedLibraryLoaderOpenEuler2403
 org.apache.gluten.spi.SharedLibraryLoaderUbuntu2004
 org.apache.gluten.spi.SharedLibraryLoaderUbuntu2204
+org.apache.gluten.spi.SharedLibraryLoaderUbuntu2404
